@@ -6,13 +6,13 @@ No promises anything works at this point ;-)
 ## Examples
 
 * [back_slice](https://github.com/ctfhacker/binja-rs/tree/master/examples/back_slice): Example implementation of a back slicing algorithm over SSA
-* [bininfo](./bininfo): Dump basic binary information for a given binary
-* [count_ins](./count_ins): Counts the number of LLIL, MLIL, HLIL calls for a given binary
-* [cyclomatic_complexity](./cyclomatic_complexity): Dumps a sample of most connected
+* [bininfo](https://github.com/ctfhacker/binja-rs/tree/master/examples/bininfo): Dump basic binary information for a given binary
+* [count_ins](https://github.com/ctfhacker/binja-rs/tree/master/examples/count_ins): Counts the number of LLIL, MLIL, HLIL calls for a given binary
+* [cyclomatic_complexity](https://github.com/ctfhacker/binja-rs/tree/master/examples/cyclomatic_complexity): Dumps a sample of most connected
 functions and basic blocks for a given binary
-* [llil_parser](./llil_parser): Dumps LLIL instructions
-* [mlil_parser](./mlil_parser): Dumps MLIL instructions
-* [hlil_parser](./hlil_parser): Dumps HLIL instructions
+* [llil_parser](https://github.com/ctfhacker/binja-rs/tree/master/examples/llil_parser): Dumps LLIL instructions
+* [mlil_parser](https://github.com/ctfhacker/binja-rs/tree/master/examples/mlil_parser): Dumps MLIL instructions
+* [hlil_parser](https://github.com/ctfhacker/binja-rs/tree/master/examples/hlil_parser): Dumps HLIL instructions
 
 ## Building bindings
 
