@@ -5,7 +5,7 @@ No promises anything works at this point ;-)
 
 ## Examples
 
-* [back_slice](./back_slice): Example implementation of a back slicing algorithm over SSA
+* [back_slice](https://github.com/ctfhacker/binja-rs/tree/master/examples/back_slice): Example implementation of a back slicing algorithm over SSA
 * [bininfo](./bininfo): Dump basic binary information for a given binary
 * [count_ins](./count_ins): Counts the number of LLIL, MLIL, HLIL calls for a given binary
 * [cyclomatic_complexity](./cyclomatic_complexity): Dumps a sample of most connected
