@@ -1,7 +1,7 @@
 # Binary Ninja Rust Bindings
 
-Work in progress Rust bindings geared towards analysis. Features added as they come up
-when 
+Work in progress Rust bindings geared towards analysis. Features added as they come up.
+No promises anything works at this point ;-)
 
 ## Examples
 
