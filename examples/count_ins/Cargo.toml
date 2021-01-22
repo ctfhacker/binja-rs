@@ -1,0 +1,10 @@
+[package]
+name = "count_ins"
+version = "0.1.0"
+authors = ["thebarbershopper <cld251@gmail.com>"]
+
+[dependencies]
+binja-rs = { path = "../../../binja-rs" }
+clap = "*"
+rayon = "*"
+anyhow = "*"

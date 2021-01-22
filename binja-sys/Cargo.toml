@@ -1,0 +1,12 @@
+[package]
+authors = ["thebarbershopper <cld251@gmail.com>"]
+name = "binja-sys"
+build = "build.rs"
+version = "0.1.0"
+
+[build-dependencies]
+bindgen = "*"
+
+[features]
+default = []
+build_time_bindings = []

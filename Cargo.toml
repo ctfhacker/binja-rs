@@ -1,0 +1,24 @@
+[package]
+name = "binja-rs"
+version = "0.1.0"
+authors = ["thebarbershopper <cld251@gmail.com>"]
+
+[dependencies]
+binja-sys = { path = "binja-sys", version = "0.1.0" }
+anyhow = "1.0.13"
+log = "0.4.0"
+env_logger = "0.8.2"
+rayon = "1.5.0"
+
+# The testing profile, used for `cargo test`.
+[profile.test]
+opt-level = 0
+debug = true
+rpath = false
+lto = false
+debug-assertions = true
+codegen-units = 1
+panic = 'unwind'
+
+[features]
+default = []

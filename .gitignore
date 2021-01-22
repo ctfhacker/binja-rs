@@ -1,0 +1,10 @@
+**/*~
+**/*.swp
+target/
+**/target
+**/Cargo.lock
+binja-sys/binaryninja-api
+**/*.rs.bk
+tags
+examples/*/target
+examples/*/.gdb_history
