@@ -5,14 +5,14 @@ when
 
 ## Examples
 
-[back_slice](./back_slice): Example implementation of a back slicing algorithm over SSA
-[bininfo](./bininfo): Dump basic binary information for a given binary
-[count_ins](./count_ins): Counts the number of LLIL, MLIL, HLIL calls for a given binary
-[cyclomatic_complexity](./cyclomatic_complexity): Dumps a sample of most connected
+* [back_slice](./back_slice): Example implementation of a back slicing algorithm over SSA
+* [bininfo](./bininfo): Dump basic binary information for a given binary
+* [count_ins](./count_ins): Counts the number of LLIL, MLIL, HLIL calls for a given binary
+* [cyclomatic_complexity](./cyclomatic_complexity): Dumps a sample of most connected
 functions and basic blocks for a given binary
-[llil_parser](./llil_parser): Dumps LLIL instructions
-[mlil_parser](./mlil_parser): Dumps MLIL instructions
-[hlil_parser](./hlil_parser): Dumps HLIL instructions
+* [llil_parser](./llil_parser): Dumps LLIL instructions
+* [mlil_parser](./mlil_parser): Dumps MLIL instructions
+* [hlil_parser](./hlil_parser): Dumps HLIL instructions
 
 ## Building bindings
 
