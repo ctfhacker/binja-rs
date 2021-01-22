@@ -569,7 +569,7 @@ impl LowLevelILOperation {
         macro_rules! int {
             () => {{
                 let res = (instr.operands[operand_index] & 0x7fff_ffff) 
-                    - (instr.operands[operand_index] & (1 << 63));
+                    .wrapping_sub(instr.operands[operand_index] & (1 << 63));
                 operand_index += 1;
                 res
             }}

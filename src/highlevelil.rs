@@ -484,8 +484,14 @@ impl HighLevelILOperation {
 
         macro_rules! int {
             () => {{
-                let res = (instr.operands[operand_index] & 0x7fff_ffff) 
-                    - (instr.operands[operand_index] & (1 << 63));
+                /*
+                print!("{:#x} {:#x}\n", 
+                    instr.operands[operand_index] & ((1 << 63) - 1),
+                    instr.operands[operand_index] & (1 << 63));
+                */
+
+                let value = instr.operands[operand_index] ;
+                let res = (value & ((1 << 63) - 1)).wrapping_sub(value & (1 << 63));
                 operand_index += 1;
                 res
             }}
