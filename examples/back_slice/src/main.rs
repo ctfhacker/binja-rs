@@ -34,6 +34,14 @@ fn main() {
         if matches!(*instr.operation, HighLevelILOperation::Tailcall {..}) {
             instrs.push(vec![instr.clone()]);
         }
+        if matches!(*instr.operation, HighLevelILOperation::Call {..}) {
+            instrs.push(vec![instr.clone()]);
+        }
+        /*
+        if matches!(*instr.operation, HighLevelILOperation::CallSsa {..}) {
+            instrs.push(vec![instr.clone()]);
+        }
+        */
     }
 
     // Initialize the vec to store all the results that we find
@@ -110,6 +118,12 @@ fn main() {
                 break;
             }
         }
+
+        /*
+        if curr_slice.len() > 16 {
+            break;
+        }
+        */
 
         // Last instruction didn't match our filter, so continue slicing backwards
         if let Some(vars) = curr_instr.ssa_vars() {
