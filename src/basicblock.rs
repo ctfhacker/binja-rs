@@ -2,6 +2,7 @@
 use core::*;
 
 use std::sync::Arc;
+use std::convert::TryInto;
 
 use crate::lowlevelil::LowLevelILBasicBlock;
 use crate::function::Function;
@@ -180,7 +181,7 @@ pub struct BasicBlockEdge {
 impl BasicBlockEdge {
     pub fn new(edge: BNBasicBlockEdge, func: Function) -> Self {
         BasicBlockEdge {
-            type_: BasicBlockEdgeType::from_u32(edge.type_),
+            type_: BasicBlockEdgeType::from_u32(edge.type_.try_into().unwrap()),
             target: BasicBlock::new(edge.target, func),
             back_edge: edge.backEdge,
             fall_through: edge.fallThrough

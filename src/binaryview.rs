@@ -70,8 +70,6 @@ impl BinaryView {
         // Create the initial binary view to get the available view types
         let view = BinaryView::open(filename)?;
 
-        print!("DONE open\n");
-
         // Init the logger
         // Go through all found view types (except Raw) for this file and attempt to create that 
         // type

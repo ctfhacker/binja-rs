@@ -1,5 +1,7 @@
 //! Provides logging capabilities from Binja Ninja core
 
+use std::convert::TryInto;
+
 /// Log level to report from Binja Ninja core
 #[repr(u32)]
 pub enum LogLevel {
@@ -12,10 +14,10 @@ pub enum LogLevel {
 
 /// Enable log to stdout
 pub fn to_stdout(level: LogLevel) {
-    unsafe { core::BNLogToStdout(level as u32); }
+    unsafe { core::BNLogToStdout((level as u32).try_into().unwrap()); }
 }
 
 /// Enable log to stderr
 pub fn to_stderr(level: LogLevel) {
-    unsafe { core::BNLogToStderr(level as u32); }
+    unsafe { core::BNLogToStderr((level as u32).try_into().unwrap()); }
 }
