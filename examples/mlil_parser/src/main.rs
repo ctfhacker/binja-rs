@@ -25,36 +25,22 @@ fn main() -> Result<()> {
     let filename = matches.value_of("INPUT").unwrap();
     let bv = BinaryView::new_from_filename(filename).unwrap();
 
-    println!("---------- MLIL ----------");
-    bv.functions().par_iter().for_each(|func| {
-        for bb in func.mlil().unwrap().blocks() {
-            for il in bb.il().iter() {
-                println!("[{:?}:{}] {:?} - {}", func.name(), il.instr_index.unwrap_or(!0), il.operation, il);
-            }
-        }
-    });
+    print!("MLIL instructions\n");
 
-    /*
-    println!("---------- MLIL ----------");
-    for func in bv.functions().iter().filter(|x| x.name().unwrap() == "_init".to_string()) {
-        println!("func: {:?}", func.name().unwrap());
-        for bb in func.medium_level_il().blocks() {
-            for il in bb.il().iter().take(10) {
-                println!("[{}] {:?} - {}", il.instr_index, il.operation, il);
-            }
-        }
+    let now = std::time::Instant::now();
+    for instr in bv.mlil_instructions().iter().take(10) {
+        print!("{}\n", instr);
     }
-    */
+    print!("Took {:?}\n\n", now.elapsed());
 
-    println!("---------- MLIL SSA ----------");
-    for func in bv.functions().iter() {
-        println!("SSA Func: {:?}", func.name().unwrap());
-        for bb in func.medium_level_il()?.ssa_form()?.blocks() {
-            for il in bb.il().iter().take(10) {
-                println!("[{:?}] {:?} - {}", il.instr_index, il.operation, il);
-            }
-        }
+    print!("MLIL instructions gathered in parallel\n");
+
+    let now = std::time::Instant::now();
+    for instr in bv.par_mlil_instructions().iter().take(10) {
+        print!("{}\n", instr);
     }
+    print!("Took {:?}\n", now.elapsed());
+
 
     Ok(())
 }

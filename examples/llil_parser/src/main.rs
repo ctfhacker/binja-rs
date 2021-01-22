@@ -25,6 +25,9 @@ fn main() -> Result<()> {
     let filename = matches.value_of("INPUT").unwrap();
     let bv = binaryview::BinaryView::new_from_filename(filename).unwrap();
 
+    /*
+     OLD more verbose methods for getting LLIL and LLILSSA
+
     println!("---------- LLIL ----------");
     bv.functions().par_iter().for_each(|func| {
         for bb in func.llil().unwrap().blocks() {
@@ -45,6 +48,23 @@ fn main() -> Result<()> {
             }
         }
     });
+    */
+
+    print!("LLIL instructions\n");
+
+    let now = std::time::Instant::now();
+    for instr in bv.llil_instructions().iter().take(10) {
+        print!("{}\n", instr);
+    }
+    print!("Took {:?}\n", now.elapsed());
+
+    print!("LLIL instructions gathered in parallel\n");
+
+    let now = std::time::Instant::now();
+    for instr in bv.par_llil_instructions().iter().take(10) {
+        print!("{}\n", instr);
+    }
+    print!("Took {:?}\n", now.elapsed());
 
     Ok(())
 }

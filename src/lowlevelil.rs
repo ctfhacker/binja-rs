@@ -412,7 +412,7 @@ pub enum LowLevelILOperation {
     Const { constant: u64, },
     ConstPtr { constant: u64, },
     ExternPtr { constant: u64, offset: u64, },
-    // FloatConst { constant: float, },
+    FloatConst { constant: f64, },
     Flag { src: Flag, },
     FlagBit { src: Flag, bit: u64, },
     Add { left: LowLevelILInstruction, right: LowLevelILInstruction, },
@@ -548,6 +548,19 @@ impl LowLevelILOperation {
         macro_rules! reg {
             () => {{
                 let res = Register::new(arch.clone(), instr.operands[operand_index] as u32);
+                operand_index += 1;
+                res
+            }}
+        }
+
+        macro_rules! float {
+            () => {{
+                // Extract the value from the operand
+                let res = match instr.size {
+                    4 => f32::from_bits(instr.operands[operand_index] as u32) as f64,
+                    8 => f64::from_bits(instr.operands[operand_index]),
+                    _ => unreachable!()
+                };
                 operand_index += 1;
                 res
             }}
@@ -785,7 +798,9 @@ impl LowLevelILOperation {
                 }
             }
             BNLowLevelILOperation_LLIL_SET_REG_STACK_REL => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl {
+                    
+                }
                 /*
                 let stack = reg_stack!();
                 let dest = expr!();
@@ -796,7 +811,9 @@ impl LowLevelILOperation {
                 */
             }
             BNLowLevelILOperation_LLIL_REG_STACK_PUSH => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl {
+                    
+                }
                 /*
                 let stack = reg_stack!();
                 let src = expr!();
@@ -843,7 +860,9 @@ impl LowLevelILOperation {
                 }
             }
             BNLowLevelILOperation_LLIL_REG_STACK_REL => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl {
+                    
+                }
                 /*
                 let stack = reg_stack!();
                 let src = expr!();
@@ -853,7 +872,9 @@ impl LowLevelILOperation {
                 */
             }
             BNLowLevelILOperation_LLIL_REG_STACK_POP => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl {
+                    
+                }
                 /*
                 let stack = reg_stack!();
                 LowLevelILOperation::RegStackPop {
@@ -862,7 +883,9 @@ impl LowLevelILOperation {
                 */
             }
             BNLowLevelILOperation_LLIL_REG_STACK_FREE_REG => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl {
+                    
+                }
                 /*
                 let dest = reg!();
                 LowLevelILOperation::RegStackFreeReg {
@@ -871,7 +894,9 @@ impl LowLevelILOperation {
                 */
             }
             BNLowLevelILOperation_LLIL_REG_STACK_FREE_REL => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl {
+                    
+                }
                 /*
                 let stack = reg_stack!();
                 let dest = expr!();
@@ -900,13 +925,10 @@ impl LowLevelILOperation {
                 }
             }
             BNLowLevelILOperation_LLIL_FLOAT_CONST => {
-                unimplemented!();
-                /*
                 let constant = float!();
                 LowLevelILOperation::FloatConst {
                     constant
                 }
-                */
             }
             BNLowLevelILOperation_LLIL_FLAG => {
                 let src = flag!();
@@ -1314,7 +1336,10 @@ impl LowLevelILOperation {
                 }
             }
             BNLowLevelILOperation_LLIL_INTRINSIC => {
-                unimplemented!()
+                // unimplemented!()
+                LowLevelILOperation::Unimpl {
+                    
+                }
                 /*
                 let output = reg_or_flag_list!();
                 let intrinsic = intrinsic!();
@@ -1531,7 +1556,10 @@ impl LowLevelILOperation {
                 }
             }
             BNLowLevelILOperation_LLIL_REG_STACK_DEST_SSA => {
-                unimplemented!();
+                // unimplemented!();
+                LowLevelILOperation::Unimpl {
+                    
+                }
                 /*
                 let src = reg_stack_ssa_dest_and_src!();
                 LowLevelILOperation::RegStackDestSsa {
@@ -1560,7 +1588,7 @@ impl LowLevelILOperation {
                 }
             }
             BNLowLevelILOperation_LLIL_REG_STACK_REL_SSA => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl { }
                 /*
                 let stack = reg_stack_ssa!();
                 let src = expr!();
@@ -1571,7 +1599,7 @@ impl LowLevelILOperation {
                 */
             }
             BNLowLevelILOperation_LLIL_REG_STACK_ABS_SSA => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl { }
                 /*
                 let stack = reg_stack_ssa!();
                 let src = reg!();
@@ -1678,7 +1706,7 @@ impl LowLevelILOperation {
                 }
             }
             BNLowLevelILOperation_LLIL_INTRINSIC_SSA => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl { }
                 /*
                 let output = reg_or_flag_ssa_list!();
                 let intrinsic = intrinsic!();
@@ -1696,7 +1724,7 @@ impl LowLevelILOperation {
                 }
             }
             BNLowLevelILOperation_LLIL_REG_STACK_PHI => {
-                unimplemented!();
+                LowLevelILOperation::Unimpl { }
                 /*
                 let dest = reg_stack_ssa!();
                 let src = reg_stack_ssa_list!();

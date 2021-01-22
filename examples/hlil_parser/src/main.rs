@@ -25,31 +25,22 @@ fn main() -> Result<()> {
     let filename = matches.value_of("INPUT").unwrap();
     let bv = BinaryView::new_from_filename(filename).unwrap();
 
-    for func in bv.functions().iter().take(2) {
-        print!("{:?}\n", func.name());
-    }
+    print!("HLIL instructions\n");
 
-    let num_funcs = 3;
-    println!("---------- HLIL FIRST {} FUNCS ----------", num_funcs);
-    for func in bv.functions().iter().take(num_funcs) {
-        for bb in func.hlil()?.blocks().iter().take(num_funcs) {
-            print!("Func: {:?}\n", func.name());
-            for il in bb.il().iter() {
-                print!("{:#x}: {}\n", il.address, il);
-            }
-        }
-    };
-
-    /*
-    println!("---------- HLIL SSA ----------");
-    for func in bv.functions().iter() {
-        for bb in func.hlil()?.ssa_form()?.blocks() {
-            for il in bb.il().iter().take(10) {
-                println!("[{:?}] {:?} - {}", il.instr_index, il.operation, il);
-            }
-        }
+    let now = std::time::Instant::now();
+    for instr in bv.hlil_instructions().iter().take(10) {
+        print!("{}\n", instr);
     }
-    */
+    print!("Took {:?}\n", now.elapsed());
+
+    print!("HLIL instructions gathered in parallel\n");
+
+    let now = std::time::Instant::now();
+    for instr in bv.par_hlil_instructions().iter().take(10) {
+        print!("{}\n", instr);
+    }
+    print!("Took {:?}\n", now.elapsed());
+
 
     Ok(())
 }

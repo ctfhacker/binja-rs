@@ -752,7 +752,7 @@ impl MediumLevelILOperation {
                 }
             }
             BNMediumLevelILOperation_MLIL_FLOAT_CONST => {
-                unimplemented!();
+                MediumLevelILOperation::Unimpl{}
                 /*
                 let constant = float!();
                 MediumLevelILOperation::FloatConst {
