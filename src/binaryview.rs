@@ -392,7 +392,7 @@ impl BinaryView {
 
     /// Return all HLIL expressions in the binary, filtered by the given filter function
     pub fn hlilssa_expressions_filtered(&self, 
-            filter: &(dyn Fn(&HighLevelILInstruction) -> bool + 'static + Sync))
+            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
             -> Vec<HighLevelILInstruction> {
         // Initialize the result
         let mut res = Vec::new();
@@ -401,7 +401,7 @@ impl BinaryView {
 
         // Gather all the filtered HLILSSA expressions from all functions 
         let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().iter()
-            .filter_map(|func| func.hlilssa_expressions_filtered(filter).ok())
+            .filter_map(|func| func.hlilssa_expressions_filtered(&self, filter).ok())
             .collect();
 
         // Flatten the Vec<Vec<>> to a Vec<>
@@ -416,7 +416,7 @@ impl BinaryView {
     /// Return all HLIL expressions in the binary, filtered by the given filter function
     /// in parallel
     pub fn par_hlilssa_expressions_filtered(&self, 
-            filter: &(dyn Fn(&HighLevelILInstruction) -> bool + 'static + Sync))
+            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
             -> Vec<HighLevelILInstruction> {
         // Initialize the result
         let mut res = Vec::new();
@@ -425,7 +425,7 @@ impl BinaryView {
 
         // Gather all the filtered HLILSSA expressions from all functions in parallel
         let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
-            .filter_map(|func| func.hlilssa_expressions_filtered(filter).ok())
+            .filter_map(|func| func.hlilssa_expressions_filtered(&self, filter).ok())
             .collect();
 
         // Flatten the Vec<Vec<>> to a Vec<>

@@ -260,7 +260,8 @@ impl Function {
 
     /// Return all HLIL expressions in the binary, filtered by the given filter function
     pub fn hlilssa_expressions_filtered(&self, 
-            filter: &(dyn Fn(&HighLevelILInstruction) -> bool + 'static + Sync))
+            bv: &BinaryView,
+            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
             -> Result<Vec<HighLevelILInstruction>> {
         // Get the HLILSSA form of this function
         let curr_func = self.hlil()?.ssa_form()?;
@@ -276,7 +277,7 @@ impl Function {
         // For each expression, attempt to get the HLIL instruction and add it to the result
         for index in 0..expr_len {
             if let Ok(instr) = HighLevelILInstruction::from_expr(curr_func.clone(), index, None) {
-                if filter(&instr) {
+                if filter(&bv, &instr) {
                     res.push(instr);
                 }
             } 
