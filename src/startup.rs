@@ -27,7 +27,7 @@ pub fn get_os_plugin_path() -> PathBuf {
 #[cfg(target_os = "windows")]
 pub fn get_os_plugin_path() -> PathBuf {
     let home = std::env::var("ProgramFiles").expect("ProgramFiles");
-    std::path::PathBuf::new(&home).join("Vector35").join("BinaryNinja").join("plugins")
+    std::path::PathBuf::from(&home).join("Vector35").join("BinaryNinja").join("plugins")
 }
 
 /// Initialize plugins necessary to begin analysis

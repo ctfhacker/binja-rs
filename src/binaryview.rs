@@ -65,6 +65,9 @@ impl BinaryView {
             panic!("File not found: {}", filename);
         }
 
+        env_logger::init();
+        trace!("env_logger initialized!");
+
         init_plugins();
 
         // Create the initial binary view to get the available view types
@@ -78,15 +81,8 @@ impl BinaryView {
                 continue; 
             }
 
-            // Create a new binary view to attempt to use the found view type with
-            let new_view = BinaryView::open(filename)?;
-
-
             // Create the view type 
-            let bv = view_type.create(new_view)?;
-
-            env_logger::init();
-            trace!("env_logger initialized!");
+            let bv = view_type.create(&view)?;
 
             // If successfully created, update analysis for the view
             let now = Instant::now();
@@ -101,7 +97,7 @@ impl BinaryView {
         }
 
         Err(anyhow!("Failed to find a view type for given file: {}", filename))
-	}
+    }
 
     /// # Example
     ///
@@ -515,12 +511,17 @@ impl BinaryView {
 
         Ok(Symbol::new(sym_handle))
     }
+
+    /// Abort analysis of the currently running analysis
+    pub fn abort_analysis(&self) {
+        unsafe { BNAbortAnalysis(self.handle()); }
+    }
 }
 
 impl fmt::Display for BinaryView {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "<BinaryView: {:?}, start: {:#x}, len: {:#x}>", 
-               self.name(), self.start(), self.len())
+        // write!(f, "<BinaryView: {:?}, start: {:#x}, len: {:#x}>", self.name(), self.start(), self.len())
+        write!(f, "<BinaryView: {:?}, len: {:#x}>", self.name(), self.len())
     }
 }
 
@@ -580,11 +581,14 @@ impl BinaryViewType {
     }
 
     /// Use this BinaryViewType on the given `BinaryView`
-    fn create(&self, data: BinaryView) -> Result<BinaryView> {
+    fn create(&self, data: &BinaryView) -> Result<BinaryView> {
         let handle = unsafe_try!(BNCreateBinaryViewOfType(self.handle, data.handle()))?;
+
+        let name = data.name.clone();
+
         Ok(BinaryView { 
             handle: Arc::new(BinjaBinaryView::new(handle)), 
-            name: data.name.clone() 
+            name
         })
     }
 

@@ -19,13 +19,14 @@ macro_rules! impl_rust_binja_core {
 
         impl $name {
             pub fn new(ptr: *mut $typ) -> Self {
+                trace!("Making   {}: {:#x}", stringify!($typ), ptr as u64);
                 Self { ptr }
             }
         }
 
         impl std::ops::Drop for $name {
             fn drop(&mut self) {
-                trace!("Dropping {}", stringify!($typ));
+                trace!("Dropping {}: {:#x}", stringify!($typ), self.ptr as u64);
                 unsafe { $freefunc(self.ptr); }
             }
         }
