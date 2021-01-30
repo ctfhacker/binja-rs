@@ -330,6 +330,7 @@ impl SSAVariable {
                         HighLevelILOperation::Assign { src, .. } => { xref = src; }
                         HighLevelILOperation::AssignUnpack { src, .. } => { xref = src; }
                         HighLevelILOperation::VarInitSsa { src, .. } => { xref = src; }
+                        HighLevelILOperation::DerefSsa { src, .. } => { xref = src; }
                         // HighLevelILOperation::Nop { .. } => { Nop doesn't go anywhere, this xref isn't useful break; }
                         HighLevelILOperation::CallSsa { ref params, .. } => { 
                             // Found the Call operation, attempt to get the variable 
@@ -366,15 +367,20 @@ impl SSAVariable {
                         }
                         HighLevelILOperation::AssignMemSsa { .. } |
                         HighLevelILOperation::Tailcall { .. } |
-                        HighLevelILOperation::Call { .. }
+                        HighLevelILOperation::Call { .. } |
+                        HighLevelILOperation::Add { .. } |
+                        HighLevelILOperation::Sub { .. } |
+                        HighLevelILOperation::UnsignedLessThan { .. } |
+                        HighLevelILOperation::VarSsa { .. } |
+                        HighLevelILOperation::Const { .. } 
                         => {
                             debug!("Pushing xref: {:?}\n", &xref);
                             res.push(xref);
                             break;
                         }
                         _ => {
-                            print!("Unknown xref: {:?} FROM\n{:#x} -> {:#x}: {:?}\n", xref, 
-                                   self.var.func.start(), curr_xref.address, curr_xref);
+                            eprint!("Unknown xref: {:?} FROM\n{:#x} -> {:#x}: {:?}\n", xref.operation_name(), 
+                                   self.var.func.start(), curr_xref.address, curr_xref.operation_name());
                             continue 'xref;
 
                             // return Err(anyhow!("Unknown operation: {:#x} {:?}\n", xref.address, xref.operation));
