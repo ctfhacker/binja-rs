@@ -13,6 +13,7 @@ use std::fmt;
 use std::path::{PathBuf, Path};
 use std::time::Instant;
 use std::sync::Arc;
+use std::io::Read;
 
 use crate::unsafe_try;
 use filemetadata::FileMetadata;
@@ -72,6 +73,8 @@ impl BinaryView {
 
         init_plugins();
 
+        let is_db = !filename.ends_with("bndb");
+
         // Create the initial binary view to get the available view types
         let view = BinaryView::open(filename)?;
 
@@ -85,13 +88,16 @@ impl BinaryView {
 
             // Create the view type 
             let bv = view_type.create(&view)?;
-
+            
             // If successfully created, update analysis for the view
             let now = Instant::now();
+
             bv.update_analysis_and_wait();
 
-            // Write the database
-            bv.create_database()?;
+            if !is_db {
+                // Write the database if the file isn't already a db
+                bv.create_database()?;
+            }
 
             trace!("Analysis took {}.{} seconds", 
                     now.elapsed().as_secs(), 
@@ -228,11 +234,25 @@ impl BinaryView {
         init_plugins();
 
         let metadata = FileMetadata::from_filename(filename)?;
-
         let ffi_name = CString::new(filename).unwrap();
 
-        let handle = unsafe_try!(BNCreateBinaryDataViewFromFilename(metadata.handle(), 
-                                                                    ffi_name.as_ptr()))?;
+        let handle = if filename.ends_with("bndb") {
+            // Sanity check the header of the BNDB is correct
+            const needle: &'static str = "SQLite format 3";
+            let mut check = [0u8; needle.len()];
+            let mut f = std::fs::File::open(filename)?;
+            f.read_exact(&mut check);
+
+            // Ensure the header is the needle for the bndb file
+            assert!(check == needle.as_bytes(), 
+                "Binary Ninja database file does not have correct header");
+
+            unsafe_try!(BNOpenExistingDatabase(metadata.handle(), 
+                                               ffi_name.as_ptr()))?
+        } else {
+            unsafe_try!(BNCreateBinaryDataViewFromFilename(metadata.handle(), 
+                                                            ffi_name.as_ptr()))?
+        };
 
         Ok(BinaryView { 
             handle: Arc::new(BinjaBinaryView::new(handle)), 
@@ -591,7 +611,6 @@ impl BinaryView {
         unsafe {
             let settings = SaveSettings::new()?;
             let snapshot = BNSaveAutoSnapshot(self.handle(), settings.handle());
-            print!("Snapshot? {}\n", snapshot);
         }
 
         Ok(())
