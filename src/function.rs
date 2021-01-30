@@ -287,6 +287,24 @@ impl Function {
         Ok(res)
     }
 
+    /// Return all HLIL instructions in the binary, filtered by the given filter function
+    pub fn hlil_instructions_filtered(&self, 
+            bv: &BinaryView,
+            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
+            -> Result<Vec<HighLevelILInstruction>> {
+        let mut res = Vec::new();
+
+        for bb in self.hlil()?.blocks() {
+            for instr in bb.il() {
+                if filter(&bv, &instr) {
+                    res.push(instr);
+                }
+            }
+        }
+
+        Ok(res)
+    }
+
     pub fn get_low_level_il_at(&self, addr: u64) -> Result<LowLevelILInstruction> {
         let index = unsafe {
             BNGetLowLevelILForInstruction(self.handle(), self.arch()?.handle(), addr)

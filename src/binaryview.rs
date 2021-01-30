@@ -1,8 +1,9 @@
 //! Provides the top level `BinaryView` for analyzing binaries
 use core::*;
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use rayon::prelude::*;
+use rayon::iter::IntoParallelIterator;
 
 use std::slice;
 use std::ffi::CStr;
@@ -26,13 +27,14 @@ use lowlevelil::LowLevelILInstruction;
 use mediumlevelil::MediumLevelILInstruction;
 use highlevelil::HighLevelILInstruction;
 use symbol::Symbol;
+use savesettings::SaveSettings;
 
 /// Top level struct for accessing binary analysis functions
 #[derive(Clone)]
 pub struct BinaryView {
     /// Handle given by BinjaCore
     handle: Arc<BinjaBinaryView>,
-    name:   PathBuf
+    meta:   FileMetadata,
 }
 
 unsafe impl Send for BinaryView {}
@@ -88,6 +90,9 @@ impl BinaryView {
             let now = Instant::now();
             bv.update_analysis_and_wait();
 
+            // Write the database
+            bv.create_database()?;
+
             trace!("Analysis took {}.{} seconds", 
                     now.elapsed().as_secs(), 
                     now.elapsed().subsec_nanos());
@@ -97,6 +102,18 @@ impl BinaryView {
         }
 
         Err(anyhow!("Failed to find a view type for given file: {}", filename))
+    }
+
+    /// Return the `Raw` BinaryViewType for this BinaryView
+    pub fn raw_view(&self) -> Result<BinaryView> {
+        let name = CString::new("Raw").unwrap();
+        let handle = unsafe_try!(BNGetFileViewOfType(self.meta.handle(), name.as_ptr()))
+            .context("BNGetFileViewOfType failed")?;
+
+        Ok(BinaryView { 
+            handle: Arc::new(BinjaBinaryView::new(handle)), 
+            meta: self.meta.clone(),
+        })
     }
 
     /// # Example
@@ -178,8 +195,8 @@ impl BinaryView {
     }
 
     /// Retrieve the `filename` of the binary currently being analyzed
-    pub fn name(&self) -> &PathBuf {
-        &self.name
+    pub fn name(&self) -> PathBuf {
+        self.meta.filename()
     }
 
     pub fn len(&self) -> u64 {
@@ -219,7 +236,7 @@ impl BinaryView {
 
         Ok(BinaryView { 
             handle: Arc::new(BinjaBinaryView::new(handle)), 
-            name: metadata.filename() 
+            meta: metadata,
         })
     }
 
@@ -433,6 +450,29 @@ impl BinaryView {
         res
     }
 
+    /// Return all HLIL instructions in the binary, filtered by the given filter function
+    pub fn par_hlil_instructions_filtered(&self, 
+            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
+            -> Vec<HighLevelILInstruction> {
+        // Initialize the result
+        let mut res = Vec::new();
+
+        print!("Getting HLILSSA instructions\n");
+
+        // Gather all the filtered HLILSSA expressions from all functions in parallel
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+            .filter_map(|func| func.hlil_instructions_filtered(&self, filter).ok())
+            .collect();
+
+        // Flatten the Vec<Vec<>> to a Vec<>
+        for instrs in all_instrs {
+            res.extend(instrs);
+        }
+
+        // Return the result
+        res
+    }
+
     /// Get a list of cross-references or xrefs to the provided virtual address
     pub fn get_code_refs(&self, addr: u64) -> Vec<ReferenceSource> {
         let mut count = 0;
@@ -516,6 +556,46 @@ impl BinaryView {
     pub fn abort_analysis(&self) {
         unsafe { BNAbortAnalysis(self.handle()); }
     }
+
+
+    /// Create a database for this binary view
+    pub fn create_database(&self) -> Result<()> {
+        unsafe {
+            let mut bndb = self.meta.filename();
+            bndb.set_extension("bndb");
+
+            // Get a generic save settings to save with
+            let settings = SaveSettings::new()
+                .context("Failed to create SaveSettings")?;
+
+            // Create the filename for the database
+            let ptr = CString::new(bndb.to_str().unwrap()).unwrap();
+
+            // Get the raw BinaryViewType for this BinaryView
+            let raw_type = self.raw_view()
+                .context("Failed to create raw view")?;
+
+            // Create the database
+            let res = BNCreateDatabase(raw_type.handle(), ptr.as_ptr(), settings.handle());
+            if !res {
+                Err(anyhow!("Failed to create database"))
+            } else {
+                print!("Saved database to {:?}\n", bndb);
+                Ok(())
+            }
+        }
+    }
+
+    /// Save the current view into the database
+    pub fn save_auto_snapshot(&self) -> Result<()> {
+        unsafe {
+            let settings = SaveSettings::new()?;
+            let snapshot = BNSaveAutoSnapshot(self.handle(), settings.handle());
+            print!("Snapshot? {}\n", snapshot);
+        }
+
+        Ok(())
+    }
 }
 
 impl fmt::Display for BinaryView {
@@ -584,11 +664,9 @@ impl BinaryViewType {
     fn create(&self, data: &BinaryView) -> Result<BinaryView> {
         let handle = unsafe_try!(BNCreateBinaryViewOfType(self.handle, data.handle()))?;
 
-        let name = data.name.clone();
-
         Ok(BinaryView { 
             handle: Arc::new(BinjaBinaryView::new(handle)), 
-            name
+            meta: data.meta.clone(),
         })
     }
 

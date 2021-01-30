@@ -58,3 +58,4 @@ impl_rust_binja_core!(wrapper BinjaHighLevelILFunction, kind BNHighLevelILFuncti
                       freefunc BNFreeHighLevelILFunction);
 impl_rust_binja_core!(wrapper BinjaSymbol, kind BNSymbol, freefunc BNFreeSymbol);
 impl_rust_binja_core!(wrapper BinjaFileMetadata, kind BNFileMetadata, freefunc BNFreeFileMetadata);
+impl_rust_binja_core!(wrapper BinjaSaveSettings, kind BNSaveSettings, freefunc BNFreeSaveSettings);
