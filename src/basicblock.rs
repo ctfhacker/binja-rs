@@ -1,17 +1,22 @@
 //! Provides BasicBlock and analysis functions for Basic Blocks
 use core::*;
 
+use anyhow::Result;
+
 use std::sync::Arc;
 use std::convert::TryInto;
 
+use crate::unsafe_try;
 use crate::lowlevelil::LowLevelILBasicBlock;
+use crate::mediumlevelil::MediumLevelILBasicBlock;
 use crate::function::Function;
 use crate::wrappers::BinjaBasicBlock;
+use crate::traits::*;
 
 #[derive(Clone)]
 pub struct BasicBlock {
     handle: Arc<BinjaBasicBlock>,
-    func: Function
+    pub func: Function
 }
 
 impl BasicBlock {
@@ -30,17 +35,16 @@ impl BasicBlock {
         unimplemented!()
     }
 
-    /*
-    pub fn medium_level_il(&self) -> MediumLevelILBasicBlock {
-        let mlil_func = self.func.medium_level_il();
-        println!("Testing mlil_func:: {:?}", mlil_func);
-        if let Some(mlil_bb) = MediumLevelILBasicBlock::new(self.handle, mlil_func.clone()) {
-            println!("Testing:: {:?}", mlil_bb.il());
-            return mlil_bb
-        }
-        panic!("Cannot creat MLIL Basic Block: {:?}", self);
+    /// Create a MLIL basic block
+    pub fn medium_level_il(&self) -> Result<MediumLevelILBasicBlock> {
+        let mlil_func = self.func.medium_level_il()?;
+        MediumLevelILBasicBlock::new(self.handle(), mlil_func.clone())
     }
-    */
+
+    /// Get the MLIL form of this basic block (Alias for self.medium_level_il)
+    pub fn mlil(&self) -> Result<MediumLevelILBasicBlock> {
+        self.medium_level_il()
+    }
 
     /// Get the start index of a basic block
     pub fn start(&self) -> u64 {
@@ -55,6 +59,22 @@ impl BasicBlock {
     /// Get the length of the basic block
     pub fn len(&self) -> u64 {
         self.end() - self.start()
+    }
+
+    pub fn print_mlil(&self) {
+        if let Ok(mlilbb) = self.mlil() {
+            for instr in mlilbb.il() {
+                print!("{:#x}: {}\n", instr.address, instr);
+            }
+        }
+    }
+
+    pub fn print_mlilssa(&self) {
+        if let Ok(mlilbb) = self.mlil() {
+            for instr in mlilbb.il() {
+                print!("{:#x}: {}\n", instr.ssa_form().unwrap().address, instr.ssa_form().unwrap());
+            }
+        }
     }
 
     /// Get the total number of edges for this basic block
@@ -124,6 +144,137 @@ impl BasicBlock {
 
             // Free the list from core
             BNFreeBasicBlockEdgeList(edges, count);
+        }
+
+        res
+    }
+
+    /// List of dominators for this basic block
+    pub fn dominators(&self) -> Vec<BasicBlock> {
+        let mut count = 0;
+
+        let mut res = Vec::new();
+
+        unsafe {
+            let blocks = BNGetBasicBlockDominators(self.handle(), &mut count, false);
+            let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
+            for block in blocks_slice {
+                res.push(BasicBlock::new(*block, self.func.clone()));
+            }
+        }
+
+        res
+    }
+
+    /// List of post dominators for this basic block
+    pub fn post_dominators(&self) -> Vec<BasicBlock> {
+        let mut count = 0;
+
+        let mut res = Vec::new();
+
+        unsafe {
+            let blocks = BNGetBasicBlockDominators(self.handle(), &mut count, true);
+            let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
+            for block in blocks_slice {
+                res.push(BasicBlock::new(*block, self.func.clone()));
+            }
+        }
+
+        res
+    }
+
+    /// List of strict dominators for this basic block
+    pub fn strict_dominators(&self) -> Vec<BasicBlock> {
+        let mut count = 0;
+
+        let mut res = Vec::new();
+
+        unsafe {
+            let blocks = BNGetBasicBlockStrictDominators(self.handle(), &mut count, false);
+            let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
+            for block in blocks_slice {
+                res.push(BasicBlock::new(*block, self.func.clone()));
+            }
+        }
+
+        res
+    }
+
+    /// Get the immediate dominator for this basic block
+    pub fn immediate_dominator(&self) -> Result<BasicBlock> {
+        let handle = unsafe_try!(BNGetBasicBlockImmediateDominator(self.handle(), false))?;
+        Ok(BasicBlock::new(handle, self.func.clone()))
+    }
+
+    /// Get the immediate post dominator for this basic block
+    pub fn immediate_post_dominator(&self) -> Result<BasicBlock> {
+        let handle = unsafe_try!(BNGetBasicBlockImmediateDominator(self.handle(), true))?;
+        Ok(BasicBlock::new(handle, self.func.clone()))
+    }
+
+    /// List of child blocks in the dominator tree for this basic block
+    pub fn dominator_tree_children(&self) -> Vec<BasicBlock> {
+        let mut count = 0;
+
+        let mut res = Vec::new();
+
+        unsafe {
+            let blocks = BNGetBasicBlockDominatorTreeChildren(self.handle(), &mut count, false);
+            let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
+            for block in blocks_slice {
+                res.push(BasicBlock::new(*block, self.func.clone()));
+            }
+        }
+
+        res
+    }
+
+    /// List of child blocks in the post dominator tree for this basic block
+    pub fn post_dominator_tree_children(&self) -> Vec<BasicBlock> {
+        let mut count = 0;
+
+        let mut res = Vec::new();
+
+        unsafe {
+            let blocks = BNGetBasicBlockDominatorTreeChildren(self.handle(), &mut count, true);
+            let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
+            for block in blocks_slice {
+                res.push(BasicBlock::new(*block, self.func.clone()));
+            }
+        }
+
+        res
+    }
+
+    /// List of child blocks in the dominator tree for this basic block
+    pub fn dominance_frontier(&self) -> Vec<BasicBlock> {
+        let mut count = 0;
+
+        let mut res = Vec::new();
+
+        unsafe {
+            let blocks = BNGetBasicBlockDominanceFrontier(self.handle(), &mut count, false);
+            let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
+            for block in blocks_slice {
+                res.push(BasicBlock::new(*block, self.func.clone()));
+            }
+        }
+
+        res
+    }
+
+    /// List of child blocks in the post dominator tree for this basic block
+    pub fn post_dominance_frontier(&self) -> Vec<BasicBlock> {
+        let mut count = 0;
+
+        let mut res = Vec::new();
+
+        unsafe {
+            let blocks = BNGetBasicBlockDominanceFrontier(self.handle(), &mut count, true);
+            let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
+            for block in blocks_slice {
+                res.push(BasicBlock::new(*block, self.func.clone()));
+            }
         }
 
         res

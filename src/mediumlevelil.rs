@@ -20,6 +20,7 @@ use crate::instruction::InstructionTextToken;
 use crate::traits::{FunctionTrait, BasicBlockTrait};
 use crate::wrappers::{BinjaMediumLevelILFunction, BinjaFunction, BinjaBasicBlock};
 use crate::highlevelil::HighLevelILInstruction;
+use crate::basicblock::BasicBlock;
 
 #[derive(Clone)]
 pub struct MediumLevelILFunction {
@@ -309,6 +310,17 @@ impl MediumLevelILInstruction {
     /// Return the name of the operation for this MLIL instruction
     pub fn operation_name(&self) -> &'static str {
         self.operation.name()
+    }
+
+    pub fn basic_block(&self) -> Result<BasicBlock> {
+        if self.instr_index.is_none() {
+            return Err(anyhow!("Cannot create MLIL basic block without instr_index"));
+        }
+
+        let handle = unsafe_try!(BNGetMediumLevelILBasicBlockForInstruction(
+                self.function.handle(), self.instr_index.unwrap()))?;
+
+        Ok(BasicBlock::new(handle, self.function.function()))
     }
 }
 
