@@ -87,6 +87,13 @@ impl HighLevelILFunction {
 
         HighLevelILInstruction::from_expr(self.clone(), expr_index, None)
     }
+
+    /// Get the total number of HLILSSA expressions in this function
+    pub fn expr_count(&self) -> u64 {
+        unsafe {
+            BNGetHighLevelILExprCount(self.handle())
+        }
+    }
 }
 
 impl fmt::Display for HighLevelILFunction {

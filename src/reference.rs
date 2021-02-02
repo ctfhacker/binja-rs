@@ -78,7 +78,7 @@ impl ReferenceSource {
 
     /// Get the HLIL instruction for this xref
     pub fn hlilssa(&self) -> Result<HighLevelILInstruction> {
-        self.mlilssa()?.hlilssa()
+        self.hlil()?.ssa_form()
     }
 
     /// Alias for self.addr

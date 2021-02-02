@@ -48,9 +48,14 @@ impl MediumLevelILFunction {
         Function::from_arc(self.func.clone())
     }
 
-    /// Get the address of this function
+    /// Get the start of this function
+    pub fn start(&self) -> u64 {
+        unsafe { BNGetFunctionStart(**self.func) }
+    }
+
+    /// Get the addrses of this function
     pub fn address(&self) -> u64 {
-        unsafe { BNMediumLevelILGetCurrentAddress(self.handle()) }
+        unsafe { BNGetFunctionStart(**self.func) }
     }
 
     /// Get the number of instructions in this function
@@ -195,6 +200,7 @@ impl BasicBlockTrait for MediumLevelILBasicBlock {
 unsafe impl Send for MediumLevelILBasicBlock {}
 unsafe impl Sync for MediumLevelILBasicBlock {}
 
+#[derive(Clone)]
 pub struct MediumLevelILInstruction {
     pub operation: Box<MediumLevelILOperation>,
     pub source_operand: u32,
@@ -203,8 +209,7 @@ pub struct MediumLevelILInstruction {
     pub address: u64,
     pub function: MediumLevelILFunction,
     pub expr_index: u64,
-    pub instr_index: Option<u64>,
-    pub text: Result<String>
+    pub instr_index: Option<u64>
 }
 
 unsafe impl Send for MediumLevelILInstruction {}
@@ -231,13 +236,6 @@ impl MediumLevelILInstruction {
             });
         }
 
-        // If we have the instruction index, grab the text for that instruction
-        let text = if let Some(index) = instr_index {
-            func.text(index)
-        } else {
-            Err(anyhow!("text() for None from_expr unimpl"))// unimplemented!()
-        };
-
         MediumLevelILInstruction {
             operation: Box::new(MediumLevelILOperation::from_instr(instr, &func, expr_index)),
             source_operand: instr.sourceOperand,
@@ -246,10 +244,19 @@ impl MediumLevelILInstruction {
             address: instr.address,
             function: func,
             expr_index,
-            instr_index,
-            text
+            instr_index
         }
     }
+
+    pub fn text(&self) -> Result<String> {
+        // If we have the instruction index, grab the text for that instruction
+        if let Some(index) = self.instr_index {
+            self.function.text(index)
+        } else {
+            Err(anyhow!("text() for None from_expr unimpl"))// unimplemented!()
+        }
+    }
+
 
     /// Convert MLIL instruction into MLIL SSA (Alias for ssa_form)
     pub fn ssa(&self) -> Result<MediumLevelILInstruction> {
@@ -287,11 +294,27 @@ impl MediumLevelILInstruction {
     pub fn hlilssa(&self) -> Result<HighLevelILInstruction> {
         self.high_level_il()?.ssa_form()
     }
+
+    /// Returns all of the `SSAVariable`s that are in this MLIL instruction
+    pub fn ssa_vars(&self) -> Option<Vec<SSAVariable>> {
+        self.operation.ssa_vars()
+    }
+
+    /// Returns all of the `SSAVariable`s that are in this MLIL instruction used in 
+    /// a back slice. This ignores any assignment variables to make back slices easier
+    pub fn back_ssa_vars(&self) -> Option<Vec<SSAVariable>> {
+        self.operation.back_ssa_vars()
+    }
+    
+    /// Return the name of the operation for this MLIL instruction
+    pub fn operation_name(&self) -> &'static str {
+        self.operation.name()
+    }
 }
 
 impl fmt::Display for MediumLevelILInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.text {
+        match self.text() {
             Ok(text) => write!(f, "{} ", text),
             Err(_) => write!(f, "[{}:{}] Invalid text!", self.function, self.address)
         }
@@ -306,7 +329,13 @@ impl fmt::Debug for MediumLevelILInstruction {
     }
 }
 
-#[derive(Debug)]
+impl std::cmp::PartialEq for MediumLevelILInstruction {
+    fn eq(&self, other: &Self) -> bool {
+        (self.function.handle(), self.expr_index) == (other.function.handle(), other.expr_index)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum MediumLevelILOperation {
     Nop { },
     SetVar { dest: Variable, src: MediumLevelILInstruction, },
@@ -324,7 +353,7 @@ pub enum MediumLevelILOperation {
     Const { constant: u64, },
     ConstPtr { constant: u64, },
     ExternPtr { constant: u64, offset: u64, },
-    // FloatConst { constant: float, },
+    FloatConst { constant: f64, },
     Import { constant: u64, },
     Add { left: MediumLevelILInstruction, right: MediumLevelILInstruction, },
     Adc { left: MediumLevelILInstruction, right: MediumLevelILInstruction, carry: MediumLevelILInstruction, },
@@ -459,6 +488,19 @@ impl MediumLevelILOperation {
             () => {{
                 let res = (instr.operands[operand_index] & 0x7fff_ffff)
                     .wrapping_sub(instr.operands[operand_index] & (1 << 63));
+                operand_index += 1;
+                res
+            }}
+        }
+
+        macro_rules! float {
+            () => {{
+                // Extract the value from the operand
+                let res = match instr.size {
+                    4 => f32::from_bits(instr.operands[operand_index] as u32) as f64,
+                    8 => f64::from_bits(instr.operands[operand_index]),
+                    _ => unreachable!()
+                };
                 operand_index += 1;
                 res
             }}
@@ -1557,4 +1599,3091 @@ impl MediumLevelILOperation {
             _ => unreachable!()
         }
     }
+
+    /// Return all the SSAVarible in this current HighLevelILOperation
+    pub fn ssa_vars(&self) -> Option<Vec<SSAVariable>> {
+        let res = match self {
+        MediumLevelILOperation::Nop {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::SetVar { /* Variable */ dest, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarField { /* Variable */ dest, /* u64 */ offset, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarSplit { /* Variable */ high, /* Variable */ low, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Load { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::LoadStruct { /* MediumLevelILInstruction */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Store { /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::StoreStruct { /* MediumLevelILInstruction */ dest, /* u64 */ offset, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Var { /* Variable */ src }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::VarField { /* Variable */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::VarSplit { /* Variable */ high, /* Variable */ low }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::AddressOf { /* Variable */ src }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::AddressOfField { /* Variable */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Const { /* u64 */ constant }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::ConstPtr { /* u64 */ constant }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::ExternPtr { /* u64 */ constant, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::FloatConst { /* float */ constant }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Import { /* u64 */ constant }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Add { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Adc { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right, /* MediumLevelILInstruction */ carry }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = carry.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Sub { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Sbb { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right, /* MediumLevelILInstruction */ carry }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = carry.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::And { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Or { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Xor { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Lsl { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Lsr { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Asr { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Rol { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Rlc { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right, /* MediumLevelILInstruction */ carry }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = carry.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Ror { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Rrc { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right, /* MediumLevelILInstruction */ carry }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = carry.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Mul { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::MuluDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::MulsDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Divu { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::DivuDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Divs { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::DivsDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Modu { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::ModuDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Mods { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::ModsDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Neg { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Not { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SignExtend { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::ZeroExtend { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::LowPart { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Jump { /* MediumLevelILInstruction */ dest }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::JumpTo { /* MediumLevelILInstruction */ dest, /* HashMap<u64, u64> */ targets }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::RetHint { /* MediumLevelILInstruction */ dest }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Call { /* Vec<Variable> */ output, /* MediumLevelILInstruction */ dest, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::CallUntyped { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::CallOutput { /* Vec<Variable> */ dest }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::CallParam { /* Vec<Variable> */ src }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Ret { /* Vec<MediumLevelILInstruction> */ src }=> {
+            let mut res = Vec::new();
+            for instr in src {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Noret {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::If { /* MediumLevelILInstruction */ condition, /* u64 */ true_, /* u64 */ false_}=> {
+            let mut res = Vec::new();
+            if let Some(vars) = condition.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Goto { /* u64 */ dest }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Equals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::NotEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SignedLessThan { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::UnsignedLessThan { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SignedLessThanEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::UnsignedLessThanEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SignedGreaterThanEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::UnsignedGreaterThanEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SsignedGreaterThan { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::UnsignedGreaterThan { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::TestBit { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::BoolToInt { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::AddOverflow { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Syscall { /* Vec<Variable> */ output, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SyscallUntyped { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Tailcall { /* Vec<Variable> */ output, /* MediumLevelILInstruction */ dest, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::TailcallUntyped { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Bp {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Trap { /* u64 */ vector }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Intrinsic { /* Vec<Variable> */ output, /* Intrinsic */ intrinsic, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::IntrinsicSsa { /* Vec<SSAVariable> */ output, /* Intrinsic */ intrinsic, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            for var in output {
+                res.push(var.clone());
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FreeVarSlot { /* Variable */ dest }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::FreeVarSlotSsa { /* SSAVariableDestSrc */ prev }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Undef {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Unimpl {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::UnimplMem { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fadd { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fsub { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fmul { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fdiv { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fsqrt { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fneg { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fabs { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FloatToInt { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::IntToFloat { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FloatConv { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::RoundToInt { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Floor { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Ceil { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Ftrunc { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpE { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpNe { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpLt { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpLe { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpGe { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpGt { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpO { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpUo { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarSsa { /* SSAVariable */ dest, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            res.push(dest.clone());
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarSsaField { /* SSAVariableDestSrc */ prev, 
+                                                 /* u64 */ offset, 
+                                                 /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res.push(prev.src.clone());
+            res
+        }
+        MediumLevelILOperation::SetVarSplitSsa { /* SSAVariable */ high, /* SSAVariable */ low, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            res.push(high.clone());
+            res.push(low.clone());
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarAliased { /* SSAVariableDestSrc */ prev, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarAliasedField { /* SSAVariableDestSrc */ prev, /* u64 */ offset, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::VarSsa { /* SSAVariable */ src }=> {
+            let mut res = Vec::new();
+            res.push(src.clone());
+            res
+        }
+        MediumLevelILOperation::VarSsaField { /* SSAVariable */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res.push(src.clone());
+            res
+        }
+        MediumLevelILOperation::VarAliased { /* SSAVariable */ src }=> {
+            let mut res = Vec::new();
+            res.push(src.clone());
+            res
+        }
+        MediumLevelILOperation::VarAliasedField { /* SSAVariable */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res.push(src.clone());
+            res
+        }
+        MediumLevelILOperation::VarSplitSsa { /* SSAVariable */ high, /* SSAVariable */ low }=> {
+            let mut res = Vec::new();
+            res.push(high.clone());
+            res.push(low.clone());
+            res
+        }
+        MediumLevelILOperation::CallSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* Vec<MediumLevelILInstruction> */ params, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::CallUntypedSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SyscallSsa { /* MediumLevelILInstruction */ output, /* Vec<MediumLevelILInstruction> */ params, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SyscallUntypedSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::TailcallSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* Vec<MediumLevelILInstruction> */ params, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::TailcallUntypedSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::CallOutputSsa { /* u64 */ dest_memory, /* Vec<SSAVariable> */ dest }=> {
+            let mut res = Vec::new();
+            for var in dest {
+                res.push(var.clone());
+            }
+            res
+        }
+        MediumLevelILOperation::CallParamSsa { /* u64 */ src_memory, /* Vec<SSAVariable> */ src }=> {
+            let mut res = Vec::new();
+            for var in src {
+                res.push(var.clone());
+            }
+            res
+        }
+        MediumLevelILOperation::LoadSsa { /* MediumLevelILInstruction */ src, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::LoadStructSsa { /* MediumLevelILInstruction */ src, /* u64 */ offset, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::StoreSsa { /* MediumLevelILInstruction */ dest, /* u64 */ dest_memory, /* u64 */ src_memory, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::StoreStructSsa { /* MediumLevelILInstruction */ dest, /* u64 */ offset, /* u64 */ dest_memory, /* u64 */ src_memory, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::VarPhi { /* SSAVariable */ dest, /* Vec<SSAVariable> */ src }=> {
+            let mut res = Vec::new();
+            res.push(dest.clone());
+            for var in src {
+                res.push(var.clone());
+            }
+            res
+        }
+        MediumLevelILOperation::MemPhi { /* u64 */ dest_memory, /* Vec<u64> */ src_memory }=> {
+            let mut res = Vec::new();
+            res
+        }
+        };
+
+        if res.is_empty() { None } else { Some(res) }
+    }
+
+    /// Return all the SSAVarible in this current HighLevelILOperation used in a back
+    /// slice
+    pub fn back_ssa_vars(&self) -> Option<Vec<SSAVariable>> {
+        let res = match self {
+        MediumLevelILOperation::Nop {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::SetVar { /* Variable */ dest, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarField { /* Variable */ dest, /* u64 */ offset, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarSplit { /* Variable */ high, /* Variable */ low, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Load { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::LoadStruct { /* MediumLevelILInstruction */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Store { /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::StoreStruct { /* MediumLevelILInstruction */ dest, /* u64 */ offset, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Var { /* Variable */ src }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::VarField { /* Variable */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::VarSplit { /* Variable */ high, /* Variable */ low }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::AddressOf { /* Variable */ src }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::AddressOfField { /* Variable */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Const { /* u64 */ constant }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::ConstPtr { /* u64 */ constant }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::ExternPtr { /* u64 */ constant, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::FloatConst { /* float */ constant }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Import { /* u64 */ constant }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Add { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Adc { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right, /* MediumLevelILInstruction */ carry }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = carry.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Sub { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Sbb { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right, /* MediumLevelILInstruction */ carry }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = carry.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::And { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Or { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Xor { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Lsl { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Lsr { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Asr { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Rol { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Rlc { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right, /* MediumLevelILInstruction */ carry }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = carry.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Ror { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Rrc { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right, /* MediumLevelILInstruction */ carry }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = carry.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Mul { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::MuluDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::MulsDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Divu { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::DivuDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Divs { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::DivsDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Modu { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::ModuDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Mods { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::ModsDp { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Neg { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Not { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SignExtend { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::ZeroExtend { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::LowPart { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Jump { /* MediumLevelILInstruction */ dest }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::JumpTo { /* MediumLevelILInstruction */ dest, /* HashMap<u64, u64> */ targets }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::RetHint { /* MediumLevelILInstruction */ dest }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Call { /* Vec<Variable> */ output, /* MediumLevelILInstruction */ dest, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::CallUntyped { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::CallOutput { /* Vec<Variable> */ dest }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::CallParam { /* Vec<Variable> */ src }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Ret { /* Vec<MediumLevelILInstruction> */ src }=> {
+            let mut res = Vec::new();
+            for instr in src {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Noret {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::If { /* MediumLevelILInstruction */ condition, /* u64 */ true_, /* u64 */ false_}=> {
+            let mut res = Vec::new();
+            if let Some(vars) = condition.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Goto { /* u64 */ dest }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Equals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::NotEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SignedLessThan { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::UnsignedLessThan { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SignedLessThanEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::UnsignedLessThanEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SignedGreaterThanEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::UnsignedGreaterThanEquals { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SsignedGreaterThan { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::UnsignedGreaterThan { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::TestBit { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::BoolToInt { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::AddOverflow { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Syscall { /* Vec<Variable> */ output, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SyscallUntyped { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Tailcall { /* Vec<Variable> */ output, /* MediumLevelILInstruction */ dest, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::TailcallUntyped { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Bp {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Trap { /* u64 */ vector }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Intrinsic { /* Vec<Variable> */ output, /* Intrinsic */ intrinsic, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::IntrinsicSsa { /* Vec<SSAVariable> */ output, /* Intrinsic */ intrinsic, /* Vec<MediumLevelILInstruction> */ params }=> {
+            let mut res = Vec::new();
+            for var in output {
+                res.push(var.clone());
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FreeVarSlot { /* Variable */ dest }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::FreeVarSlotSsa { /* SSAVariableDestSrc */ prev }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Undef {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::Unimpl {  }=> {
+            let mut res = Vec::new();
+            res
+        }
+        MediumLevelILOperation::UnimplMem { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fadd { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fsub { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fmul { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fdiv { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fsqrt { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fneg { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Fabs { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FloatToInt { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::IntToFloat { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FloatConv { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::RoundToInt { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Floor { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Ceil { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::Ftrunc { /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpE { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpNe { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpLt { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpLe { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpGe { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpGt { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpO { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::FcmpUo { /* MediumLevelILInstruction */ left, /* MediumLevelILInstruction */ right }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = left.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = right.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarSsa { /* SSAVariable */ dest, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarSsaField { /* SSAVariableDestSrc */ prev, 
+                                                 /* u64 */ offset, 
+                                                 /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res.push(prev.src.clone());
+            res
+        }
+        MediumLevelILOperation::SetVarSplitSsa { /* SSAVariable */ high, /* SSAVariable */ low, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            res.push(high.clone());
+            res.push(low.clone());
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarAliased { /* SSAVariableDestSrc */ prev, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SetVarAliasedField { /* SSAVariableDestSrc */ prev, /* u64 */ offset, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::VarSsa { /* SSAVariable */ src }=> {
+            let mut res = Vec::new();
+            res.push(src.clone());
+            res
+        }
+        MediumLevelILOperation::VarSsaField { /* SSAVariable */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res.push(src.clone());
+            res
+        }
+        MediumLevelILOperation::VarAliased { /* SSAVariable */ src }=> {
+            let mut res = Vec::new();
+            res.push(src.clone());
+            res
+        }
+        MediumLevelILOperation::VarAliasedField { /* SSAVariable */ src, /* u64 */ offset }=> {
+            let mut res = Vec::new();
+            res.push(src.clone());
+            res
+        }
+        MediumLevelILOperation::VarSplitSsa { /* SSAVariable */ high, /* SSAVariable */ low }=> {
+            let mut res = Vec::new();
+            res.push(high.clone());
+            res.push(low.clone());
+            res
+        }
+        MediumLevelILOperation::CallSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* Vec<MediumLevelILInstruction> */ params, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::CallUntypedSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SyscallSsa { /* MediumLevelILInstruction */ output, /* Vec<MediumLevelILInstruction> */ params, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::SyscallUntypedSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::TailcallSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* Vec<MediumLevelILInstruction> */ params, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            for instr in params {
+                if let Some(vars) = instr.ssa_vars() {
+                    for var in vars {
+                        res.push(var.clone());
+                    }
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::TailcallUntypedSsa { /* MediumLevelILInstruction */ output, /* MediumLevelILInstruction */ dest, /* MediumLevelILInstruction */ params, /* MediumLevelILInstruction */ stack }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = output.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = params.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = stack.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::CallOutputSsa { /* u64 */ dest_memory, /* Vec<SSAVariable> */ dest }=> {
+            let mut res = Vec::new();
+            for var in dest {
+                res.push(var.clone());
+            }
+            res
+        }
+        MediumLevelILOperation::CallParamSsa { /* u64 */ src_memory, /* Vec<SSAVariable> */ src }=> {
+            let mut res = Vec::new();
+            for var in src {
+                res.push(var.clone());
+            }
+            res
+        }
+        MediumLevelILOperation::LoadSsa { /* MediumLevelILInstruction */ src, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::LoadStructSsa { /* MediumLevelILInstruction */ src, /* u64 */ offset, /* u64 */ src_memory }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::StoreSsa { /* MediumLevelILInstruction */ dest, /* u64 */ dest_memory, /* u64 */ src_memory, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::StoreStructSsa { /* MediumLevelILInstruction */ dest, /* u64 */ offset, /* u64 */ dest_memory, /* u64 */ src_memory, /* MediumLevelILInstruction */ src }=> {
+            let mut res = Vec::new();
+            if let Some(vars) = dest.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            if let Some(vars) = src.ssa_vars() {
+                for var in vars {
+                    res.push(var.clone());
+                }
+            }
+            res
+        }
+        MediumLevelILOperation::VarPhi { /* SSAVariable */ dest, /* Vec<SSAVariable> */ src }=> {
+            let mut res = Vec::new();
+            for var in src {
+                res.push(var.clone());
+            }
+            res
+        }
+        MediumLevelILOperation::MemPhi { /* u64 */ dest_memory, /* Vec<u64> */ src_memory }=> {
+            let mut res = Vec::new();
+            res
+        }
+        };
+
+        if res.is_empty() { None } else { Some(res) }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            MediumLevelILOperation::Nop {..} => "Nop",
+            MediumLevelILOperation::SetVar {..} => "SetVar",
+            MediumLevelILOperation::SetVarField {..} => "SetVarField",
+            MediumLevelILOperation::SetVarSplit {..} => "SetVarSplit",
+            MediumLevelILOperation::Load {..} => "Load",
+            MediumLevelILOperation::LoadStruct {..} => "LoadStruct",
+            MediumLevelILOperation::Store {..} => "Store",
+            MediumLevelILOperation::StoreStruct {..} => "StoreStruct",
+            MediumLevelILOperation::Var {..} => "Var",
+            MediumLevelILOperation::VarField {..} => "VarField",
+            MediumLevelILOperation::VarSplit {..} => "VarSplit",
+            MediumLevelILOperation::AddressOf {..} => "AddressOf",
+            MediumLevelILOperation::AddressOfField {..} => "AddressOfField",
+            MediumLevelILOperation::Const {..} => "Const",
+            MediumLevelILOperation::ConstPtr {..} => "ConstPtr",
+            MediumLevelILOperation::ExternPtr {..} => "ExternPtr",
+            MediumLevelILOperation::FloatConst {..} => "FloatConst",
+            MediumLevelILOperation::Import {..} => "Import",
+            MediumLevelILOperation::Add {..} => "Add",
+            MediumLevelILOperation::Adc {..} => "Adc",
+            MediumLevelILOperation::Sub {..} => "Sub",
+            MediumLevelILOperation::Sbb {..} => "Sbb",
+            MediumLevelILOperation::And {..} => "And",
+            MediumLevelILOperation::Or {..} => "Or",
+            MediumLevelILOperation::Xor {..} => "Xor",
+            MediumLevelILOperation::Lsl {..} => "Lsl",
+            MediumLevelILOperation::Lsr {..} => "Lsr",
+            MediumLevelILOperation::Asr {..} => "Asr",
+            MediumLevelILOperation::Rol {..} => "Rol",
+            MediumLevelILOperation::Rlc {..} => "Rlc",
+            MediumLevelILOperation::Ror {..} => "Ror",
+            MediumLevelILOperation::Rrc {..} => "Rrc",
+            MediumLevelILOperation::Mul {..} => "Mul",
+            MediumLevelILOperation::MuluDp {..} => "MuluDp",
+            MediumLevelILOperation::MulsDp {..} => "MulsDp",
+            MediumLevelILOperation::Divu {..} => "Divu",
+            MediumLevelILOperation::DivuDp {..} => "DivuDp",
+            MediumLevelILOperation::Divs {..} => "Divs",
+            MediumLevelILOperation::DivsDp {..} => "DivsDp",
+            MediumLevelILOperation::Modu {..} => "Modu",
+            MediumLevelILOperation::ModuDp {..} => "ModuDp",
+            MediumLevelILOperation::Mods {..} => "Mods",
+            MediumLevelILOperation::ModsDp {..} => "ModsDp",
+            MediumLevelILOperation::Neg {..} => "Neg",
+            MediumLevelILOperation::Not {..} => "Not",
+            MediumLevelILOperation::SignExtend {..} => "SignExtend",
+            MediumLevelILOperation::ZeroExtend {..} => "ZeroExtend",
+            MediumLevelILOperation::LowPart {..} => "LowPart",
+            MediumLevelILOperation::Jump {..} => "Jump",
+            MediumLevelILOperation::JumpTo {..} => "JumpTo",
+            MediumLevelILOperation::RetHint {..} => "RetHint",
+            MediumLevelILOperation::Call {..} => "Call",
+            MediumLevelILOperation::CallUntyped {..} => "CallUntyped",
+            MediumLevelILOperation::CallOutput {..} => "CallOutput",
+            MediumLevelILOperation::CallParam {..} => "CallParam",
+            MediumLevelILOperation::Ret {..} => "Ret",
+            MediumLevelILOperation::Noret {..} => "Noret",
+            MediumLevelILOperation::If {..} => "If",
+            MediumLevelILOperation::Goto {..} => "Goto",
+            MediumLevelILOperation::Equals {..} => "Equals",
+            MediumLevelILOperation::NotEquals {..} => "NotEquals",
+            MediumLevelILOperation::SignedLessThan {..} => "SignedLessThan",
+            MediumLevelILOperation::UnsignedLessThan {..} => "UnsignedLessThan",
+            MediumLevelILOperation::SignedLessThanEquals {..} => "SignedLessThanEquals",
+            MediumLevelILOperation::UnsignedLessThanEquals {..} => "UnsignedLessThanEquals",
+            MediumLevelILOperation::SignedGreaterThanEquals {..} => "SignedGreaterThanEquals",
+            MediumLevelILOperation::UnsignedGreaterThanEquals {..} => "UnsignedGreaterThanEquals",
+            MediumLevelILOperation::SsignedGreaterThan {..} => "SsignedGreaterThan",
+            MediumLevelILOperation::UnsignedGreaterThan {..} => "UnsignedGreaterThan",
+            MediumLevelILOperation::TestBit {..} => "TestBit",
+            MediumLevelILOperation::BoolToInt {..} => "BoolToInt",
+            MediumLevelILOperation::AddOverflow {..} => "AddOverflow",
+            MediumLevelILOperation::Syscall {..} => "Syscall",
+            MediumLevelILOperation::SyscallUntyped {..} => "SyscallUntyped",
+            MediumLevelILOperation::Tailcall {..} => "Tailcall",
+            MediumLevelILOperation::TailcallUntyped {..} => "TailcallUntyped",
+            MediumLevelILOperation::Intrinsic {..} => "Intrinsic",
+            MediumLevelILOperation::FreeVarSlot {..} => "FreeVarSlot",
+            MediumLevelILOperation::Bp {..} => "Bp",
+            MediumLevelILOperation::Trap {..} => "Trap",
+            MediumLevelILOperation::Undef {..} => "Undef",
+            MediumLevelILOperation::Unimpl {..} => "Unimpl",
+            MediumLevelILOperation::UnimplMem {..} => "UnimplMem",
+            MediumLevelILOperation::Fadd {..} => "Fadd",
+            MediumLevelILOperation::Fsub {..} => "Fsub",
+            MediumLevelILOperation::Fmul {..} => "Fmul",
+            MediumLevelILOperation::Fdiv {..} => "Fdiv",
+            MediumLevelILOperation::Fsqrt {..} => "Fsqrt",
+            MediumLevelILOperation::Fneg {..} => "Fneg",
+            MediumLevelILOperation::Fabs {..} => "Fabs",
+            MediumLevelILOperation::FloatToInt {..} => "FloatToInt",
+            MediumLevelILOperation::IntToFloat {..} => "IntToFloat",
+            MediumLevelILOperation::FloatConv {..} => "FloatConv",
+            MediumLevelILOperation::RoundToInt {..} => "RoundToInt",
+            MediumLevelILOperation::Floor {..} => "Floor",
+            MediumLevelILOperation::Ceil {..} => "Ceil",
+            MediumLevelILOperation::Ftrunc {..} => "Ftrunc",
+            MediumLevelILOperation::FcmpE {..} => "FcmpE",
+            MediumLevelILOperation::FcmpNe {..} => "FcmpNe",
+            MediumLevelILOperation::FcmpLt {..} => "FcmpLt",
+            MediumLevelILOperation::FcmpLe {..} => "FcmpLe",
+            MediumLevelILOperation::FcmpGe {..} => "FcmpGe",
+            MediumLevelILOperation::FcmpGt {..} => "FcmpGt",
+            MediumLevelILOperation::FcmpO {..} => "FcmpO",
+            MediumLevelILOperation::FcmpUo {..} => "FcmpUo",
+            MediumLevelILOperation::SetVarSsa {..} => "SetVarSsa",
+            MediumLevelILOperation::SetVarSsaField {..} => "SetVarSsaField",
+            MediumLevelILOperation::SetVarSplitSsa {..} => "SetVarSplitSsa",
+            MediumLevelILOperation::SetVarAliased {..} => "SetVarAliased",
+            MediumLevelILOperation::SetVarAliasedField {..} => "SetVarAliasedField",
+            MediumLevelILOperation::VarSsa {..} => "VarSsa",
+            MediumLevelILOperation::VarSsaField {..} => "VarSsaField",
+            MediumLevelILOperation::VarAliased {..} => "VarAliased",
+            MediumLevelILOperation::VarAliasedField {..} => "VarAliasedField",
+            MediumLevelILOperation::VarSplitSsa {..} => "VarSplitSsa",
+            MediumLevelILOperation::CallSsa {..} => "CallSsa",
+            MediumLevelILOperation::CallUntypedSsa {..} => "CallUntypedSsa",
+            MediumLevelILOperation::SyscallSsa {..} => "SyscallSsa",
+            MediumLevelILOperation::SyscallUntypedSsa {..} => "SyscallUntypedSsa",
+            MediumLevelILOperation::TailcallSsa {..} => "TailcallSsa",
+            MediumLevelILOperation::TailcallUntypedSsa {..} => "TailcallUntypedSsa",
+            MediumLevelILOperation::CallParamSsa {..} => "CallParamSsa",
+            MediumLevelILOperation::CallOutputSsa {..} => "CallOutputSsa",
+            MediumLevelILOperation::LoadSsa {..} => "LoadSsa",
+            MediumLevelILOperation::LoadStructSsa {..} => "LoadStructSsa",
+            MediumLevelILOperation::StoreSsa {..} => "StoreSsa",
+            MediumLevelILOperation::StoreStructSsa {..} => "StoreStructSsa",
+            MediumLevelILOperation::IntrinsicSsa {..} => "IntrinsicSsa",
+            MediumLevelILOperation::FreeVarSlotSsa {..} => "FreeVarSlotSsa",
+            MediumLevelILOperation::VarPhi {..} => "VarPhi",
+            MediumLevelILOperation::MemPhi {..} => "MemPhi",
+        }
+    }
+
+
 }

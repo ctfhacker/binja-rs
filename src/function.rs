@@ -168,6 +168,11 @@ impl Function {
         self.medium_level_il()
     }
 
+    /// Retrieve the Medium Level IL SSA version of this function
+    pub fn mlilssa(&self) -> Result<MediumLevelILFunction> {
+        self.medium_level_il()?.ssa_form()
+    }
+
     /// Retrieve High Level IL for the current function
     pub fn high_level_il(&self) -> Result<HighLevelILFunction> {
         HighLevelILFunction::new(self.handle.clone())
@@ -176,6 +181,11 @@ impl Function {
     /// Alias for `self.high_level_il`
     pub fn hlil(&self) -> Result<HighLevelILFunction> {
         self.high_level_il()
+    }
+
+    /// Retrieve the High Level IL SSA version of this function
+    pub fn hlilssa(&self) -> Result<HighLevelILFunction> {
+        self.high_level_il()?.ssa_form()
     }
 
     /// Returns all of the LLIL instructions for this function
@@ -253,6 +263,34 @@ impl Function {
 
         // Sanity check we have all the instructions
         assert!(expr_len == res.len() as u64, "Didn't find all HLILSSA expressions");
+
+        // Return the result
+        Ok(res)
+    }
+
+    /// Return all MLIL expressions in the binary, filtered by the given filter function
+    pub fn mlilssa_expressions_filtered(&self, 
+            bv: &BinaryView,
+            filter: &(dyn Fn(&BinaryView, &MediumLevelILInstruction) -> bool + 'static + Sync))
+            -> Result<Vec<MediumLevelILInstruction>> {
+        // Get the HLILSSA form of this function
+        let curr_func = self.mlil()?.ssa_form()?;
+
+        // Initialize the resulting Vec
+        let mut res = Vec::new();
+
+        // Get the number of expressions in this function
+        let expr_len = unsafe { BNGetMediumLevelILExprCount(curr_func.handle()) };
+
+        // For each expression, attempt to get the MLIL instruction and add it to the result
+        for index in 0..expr_len {
+            let instr = MediumLevelILInstruction::from_expr(curr_func.clone(), 
+                    index, None);
+
+            if filter(&bv, &instr) {
+                res.push(instr);
+            }
+        }
 
         // Return the result
         Ok(res)
