@@ -330,7 +330,7 @@ impl SSAVariable {
             }
 
             for curr_xref in &xrefs {
-                print!("Xref found!: {:#x}\n", curr_xref.address);
+                // print!("Xref found!: {:#x}\n", curr_xref.address);
             }
 
             debug!("XREF for {} from {:#x}: {}\n", self, self.var.func.start(), xrefs.len());
@@ -389,10 +389,10 @@ impl SSAVariable {
                             break;
                         }
                         HighLevelILOperation::ConstPtr { constant } => {
-                            let symbol = bv.get_symbol_at(constant);
-                            if let Ok(sym) = symbol {
-                                print!("Symbol found: {}\n", sym);
-                            }
+                            //let symbol = bv.get_symbol_at(constant);
+                            //if let Ok(sym) = &symbol {
+                                //print!("Symbol found: {}\n", sym);
+                            //}
                             break;
                         }
                         HighLevelILOperation::Add { ref left, ref right } => {
@@ -424,7 +424,7 @@ impl SSAVariable {
             }
 
             for instr in &res {
-                print!("Xrefs: {}", instr);
+                // print!("Xrefs: {}", instr);
             }
 
             return Ok(res);
@@ -464,7 +464,7 @@ impl SSAVariable {
             // Initialize the resulting Vec
             let mut res = Vec::new();
 
-            print!("Xref func: {:#x}\n", self.var.func.start());
+            // print!("Xref func: {:#x}\n", self.var.func.start());
 
             // Get all of the MLILSSA xrefs of this function
             // let xrefs: Vec<_> = bv.get_code_refs(self.var.func.start()).iter()
@@ -476,7 +476,7 @@ impl SSAVariable {
             }
 
             for curr_xref in xrefs.iter() {
-                print!("Xref found!: {:#x}\n", curr_xref.address);
+                // print!("Xref found!: {:#x}\n", curr_xref.address);
             }
 
             debug!("XREF for {} from {:#x}: {}\n", self, self.var.func.start(), xrefs.len());
@@ -530,10 +530,10 @@ impl SSAVariable {
                             break;
                         }
                         MediumLevelILOperation::ConstPtr { constant } => {
-                            let symbol = bv.get_symbol_at(constant);
-                            if let Ok(sym) = symbol {
-                                print!("Symbol found: {}\n", sym);
-                            }
+                            //let symbol = bv.get_symbol_at(constant);
+                            //if let Ok(sym) = &symbol {
+                                //print!("Symbol found: {}\n", sym);
+                            //}
                             break;
                         }
                         /*
@@ -560,7 +560,7 @@ impl SSAVariable {
             }
 
             for instr in &res {
-                print!("MLIL Xrefs: {}", instr);
+                // print!("MLIL Xrefs: {}", instr);
             }
 
             return Ok(res);
