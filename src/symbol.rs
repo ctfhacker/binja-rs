@@ -48,6 +48,12 @@ impl Symbol {
     pub fn ordinal(&self) -> u64 {
         unsafe { BNGetSymbolOrdinal(self.handle()) }
     }
+
+    pub fn symbol_type(&self) -> SymbolType {
+        let symbol_type = unsafe { BNGetSymbolType(self.handle()) };
+        SymbolType::from_bnsymboltype(symbol_type)
+                    .expect(format!("Found unknown SymbolType: {:?}", symbol_type).as_str())
+    }
 }
 
 impl std::fmt::Display for Symbol {
@@ -65,5 +71,30 @@ impl std::fmt::Debug for Symbol {
             .field("full_name", &self.full_name())
             .field("ordinal", &self.ordinal())
             .finish()
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum SymbolType {
+	FunctionSymbol,
+	ImportAddressSymbol,
+	ImportedFunctionSymbol,
+	DataSymbol,
+	ImportedDataSymbol
+}
+
+// Send for rayon
+unsafe impl Send for SymbolType {}
+
+impl SymbolType {
+    pub fn from_bnsymboltype(n: BNSymbolType) -> Option<SymbolType> {
+        match n as u64 {
+            0 => Some(SymbolType::FunctionSymbol),
+            1 => Some(SymbolType::ImportAddressSymbol),
+            2 => Some(SymbolType::ImportedFunctionSymbol),
+            3 => Some(SymbolType::DataSymbol),
+            4 => Some(SymbolType::ImportedDataSymbol),
+            _ => panic!("Unknown Symbol type: {:?}\n", n)
+        }
     }
 }

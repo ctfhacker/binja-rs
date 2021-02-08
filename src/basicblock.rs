@@ -27,6 +27,10 @@ impl BasicBlock {
         }
     }
 
+    pub fn from_arc(handle: Arc<BinjaBasicBlock>, func: Function) -> BasicBlock {
+        BasicBlock { handle, func }
+    }
+
     pub fn handle(&self) -> *mut BNBasicBlock {
         **self.handle
     }
@@ -175,9 +179,11 @@ impl BasicBlock {
         unsafe {
             let blocks = BNGetBasicBlockDominators(self.handle(), &mut count, true);
             let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
+
             for block in blocks_slice {
                 res.push(BasicBlock::new(*block, self.func.clone()));
             }
+
         }
 
         res
@@ -278,6 +284,13 @@ impl BasicBlock {
         }
 
         res
+    }
+}
+
+impl std::cmp::PartialEq for BasicBlock {
+    fn eq(&self, other: &Self) -> bool {
+        (self.start(), self.end(), self.func.start()) == 
+            (other.start(), other.end(), other.func.start()) 
     }
 }
 

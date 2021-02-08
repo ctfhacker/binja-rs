@@ -163,33 +163,10 @@ impl FunctionTrait for LowLevelILFunction {
         }
     }
 
-    /*
     /// Construct the text for a given LowLevelILInstruction index
-    fn expr_text(&self, expr_index: usize) -> Vec<InstructionTextToken> {
-        let mut count: usize = 0;
-
-        unsafe { 
-            // Initialize pointer to get data from BNGetLowLevelILInstructionText
-            let mut list = mem::zeroed();
-
-            BNGetLowLevelILExprText(self.handle, self.arch().unwrap().handle, 
-                                    expr_index, &mut list, &mut count);
-
-            if list.is_null() {
-                panic!("Cannot retrieve LowLevelILInstruction Tokens from expr_index: {}", self);
-            }
-
-            let list_slice = slice::from_raw_parts(list, count);
-
-            let result = list_slice.iter()
-                                   .map(|&l| InstructionTextToken::new_from_token(l))
-                                   .collect();
-
-            BNFreeInstructionText(list, count);
-            result
-        }
+    fn expr_text(&self, expr_index: u64) -> Result<String> {
+        panic!("Expr text not impl for LLIL");
     }
-    */
 }
 
 #[derive(Clone)]
@@ -215,6 +192,10 @@ impl BasicBlockTrait for LowLevelILBasicBlock {
 
     fn func(&self) -> Option<&Self::Func> {
         Some(&self.func)
+    }
+
+    fn raw_function(&self) -> Function {
+        self.func.function()
     }
 }
 

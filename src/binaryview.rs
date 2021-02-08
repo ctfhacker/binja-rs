@@ -407,6 +407,20 @@ impl BinaryView {
         res
     }
 
+    /// Return all HLIL expressions in the binary in parallel
+    pub fn par_hlil_expressions(&self) -> Vec<HighLevelILInstruction> {
+        let mut res = Vec::new();
+
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+            .filter_map(|func| func.hlil_expressions().ok())
+            .collect();
+
+        for instrs in all_instrs {
+            res.extend(instrs);
+        }
+
+        res
+    }
 
     /// Return all HLIL expressions in the binary in parallel
     pub fn par_hlilssa_expressions(&self) -> Vec<HighLevelILInstruction> {
@@ -435,6 +449,30 @@ impl BinaryView {
         // Gather all the filtered HLILSSA expressions from all functions 
         let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().iter()
             .filter_map(|func| func.hlilssa_expressions_filtered(&self, filter).ok())
+            .collect();
+
+        // Flatten the Vec<Vec<>> to a Vec<>
+        for instrs in all_instrs {
+            res.extend(instrs);
+        }
+
+        // Return the result
+        res
+    }
+
+    /// Return all HLIL expressions in the binary, filtered by the given filter function
+    /// in parallel
+    pub fn par_hlil_expressions_filtered(&self, 
+            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
+            -> Vec<HighLevelILInstruction> {
+        // Initialize the result
+        let mut res = Vec::new();
+
+        print!("Getting HLIL expressions\n");
+
+        // Gather all the filtered HLILSSA expressions from all functions in parallel
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+            .filter_map(|func| func.hlil_expressions_filtered(&self, filter).ok())
             .collect();
 
         // Flatten the Vec<Vec<>> to a Vec<>

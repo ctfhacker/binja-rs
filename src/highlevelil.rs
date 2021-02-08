@@ -14,6 +14,7 @@ use std::sync::Arc;
 use crate::unsafe_try;
 use crate::function::Function;
 use crate::architecture::CoreArchitecture;
+use crate::basicblock::BasicBlock;
 use crate::il::{SSAVariable, Variable, Intrinsic, GotoLabel};
 use crate::instruction::InstructionTextToken;
 use crate::traits::{FunctionTrait, BasicBlockTrait};
@@ -147,9 +148,46 @@ impl FunctionTrait for HighLevelILFunction {
     fn text(&self, i: u64) -> Result<String> {
         let mut count = 0;
 
-
         // Get the raw index for the given instruction index
         let expr_index = self.get_index_for_instruction(i);
+
+        // The resulting line texts
+        let mut res_lines: Vec<String> = Vec::new();
+
+        unsafe { 
+            let lines = BNGetHighLevelILExprText(self.handle(), expr_index, /* as_ast */ true, 
+                                                 &mut count);
+
+            if lines.is_null() || count == 0{
+                return Err(anyhow!("Failed to retrieve HLILInstruction tokens"));
+            }
+
+            let lines_slice = slice::from_raw_parts(lines, count as usize);
+
+            for line in lines_slice.iter() {
+                assert!(line.count < 10000, 
+                    "More than 10000 tokens?! Probably wrong struct used with BNDisassemblyTextLine");
+
+                let tokens = slice::from_raw_parts(line.tokens, line.count as usize).to_vec();
+
+                // Collect all of the token elements into one string
+                let curr_line = tokens.iter()
+                    .fold(String::new(), 
+                        |mut acc, &l| { 
+                            acc.push_str(&InstructionTextToken::new_from_token(l).text); acc 
+                        });
+
+                res_lines.push(curr_line);
+            }
+            
+            BNFreeDisassemblyTextLines(lines, count);
+        }
+
+        Ok(res_lines.join("\n"))
+    }
+
+    fn expr_text(&self, expr_index: u64) -> Result<String> {
+        let mut count = 0;
 
         // The resulting line texts
         let mut res_lines: Vec<String> = Vec::new();
@@ -198,6 +236,11 @@ impl HighLevelILBasicBlock {
         let handle = unsafe_try!(BNNewBasicBlockReference(handle))?;
         Ok(HighLevelILBasicBlock{ handle: Arc::new(BinjaBasicBlock::new(handle)), func })
     }
+
+    /// Get the raw basic block for this basic block
+    pub fn basic_block(&self) -> BasicBlock {
+        BasicBlock::from_arc(self.handle.clone(), self.func.function().clone())
+    }
 }
 
 impl BasicBlockTrait for HighLevelILBasicBlock {
@@ -210,6 +253,10 @@ impl BasicBlockTrait for HighLevelILBasicBlock {
 
     fn func(&self) -> Option<&Self::Func> {
         Some(&self.func)
+    }
+
+    fn raw_function(&self) -> Function {
+        self.func.function()
     }
 }
 
@@ -234,6 +281,22 @@ unsafe impl Send for HighLevelILInstruction {}
 unsafe impl Sync for HighLevelILInstruction {}
 
 impl HighLevelILInstruction {
+    /// Get the HLIL basic block containing this instruction
+    pub fn hlil_basic_block(&self) -> Option<HighLevelILBasicBlock> {
+        for bb in self.function.blocks() {
+            if bb.start() <= self.instr_index && bb.end() >= self.instr_index {
+                return Some(bb.clone());
+            }
+        }
+
+        None
+    }
+
+    /// Get the `BasicBlock` containing this instruction
+    pub fn basic_block(&self) -> Option<BasicBlock> {
+        Some(self.hlil_basic_block()?.basic_block())
+    }
+
     /// Get the HLIL instruction from the given `func` at the given `instr_index`
     pub fn from_func_index(func: HighLevelILFunction, instr_index: u64) -> Result<HighLevelILInstruction> { 
         // Get the raw index for the given instruction index
@@ -255,6 +318,9 @@ impl HighLevelILInstruction {
             instr.address == 0 && instr.size == 0 && instr.operation == 0 {
             return Err(anyhow!("Invalid instruction expr_index"));
         }
+
+        // If we have the instruction index, grab the text for that instruction
+        let text = func.expr_text(expr_index)?;
         
         // Get the instruction for an expression that has hasn't provided an instruction
         if instr_index.is_none() {
@@ -263,12 +329,6 @@ impl HighLevelILInstruction {
             });
         }
 
-        // If we have the instruction index, grab the text for that instruction
-        let text = if let Some(index) = instr_index {
-            func.text(index)?
-        } else {
-            "No text found".to_string()
-        };
 
         Ok(HighLevelILInstruction {
             operation: Box::new(HighLevelILOperation::from_instr(instr, &func, expr_index)?),
@@ -323,7 +383,8 @@ impl fmt::Display for HighLevelILInstruction {
         }
         */
 
-        write!(f, "{} ", self.text)
+        // write!(f, "<HLIL::{}>", self.operation_name())
+        write!(f, "{}", self.text)
     }
 }
 

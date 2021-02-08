@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::unsafe_try;
 use crate::binaryview::BinaryView;
-use crate::types::{Symbol, SymbolType};
+use crate::symbol::{Symbol, SymbolType};
 use crate::binjastr::BinjaStr;
 use crate::architecture::CoreArchitecture;
 use crate::lowlevelil::{LowLevelILFunction, LowLevelILInstruction};
@@ -53,7 +53,7 @@ impl Function {
         let mut curr_symbol = None;
         let mut symbol_type = None;
         if !function_symbol.is_null() {
-            let symbol = Symbol::new_from_symbol(function_symbol);
+            let symbol = Symbol::new(function_symbol);
             symbol_type = Some(symbol.symbol_type());
             curr_symbol = Some(symbol);
         }
@@ -75,7 +75,7 @@ impl Function {
         let mut curr_symbol = None;
         let mut symbol_type = None;
         if !function_symbol.is_null() {
-            let symbol = Symbol::new_from_symbol(function_symbol);
+            let symbol = Symbol::new(function_symbol);
             symbol_type = Some(symbol.symbol_type());
             curr_symbol = Some(symbol);
         }
@@ -130,6 +130,8 @@ impl Function {
 
         let mut res = Vec::new();
 
+        print!("Blocks start... ");
+
         unsafe { 
             let blocks = BNGetFunctionBasicBlockList(self.handle(), &mut count);
             let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
@@ -139,6 +141,8 @@ impl Function {
 
             BNFreeBasicBlockList(blocks, count);
         }
+
+        print!("end {}\n", count);
 
         res
     }
@@ -227,6 +231,34 @@ impl Function {
         Ok(res)
     }
 
+    /// Returns all of the HLIL expressions for this function. This is not by instruction, but
+    /// each individual expression available in this function
+    pub fn hlil_expressions(&self) -> Result<Vec<HighLevelILInstruction>> {
+        // Get the HLIL form of this function
+        let curr_func = self.hlil()?;
+
+        // Initialize the resulting Vec
+        let mut res = Vec::new();
+
+        // Get the number of expressions in this function
+        let expr_len = unsafe {
+            BNGetHighLevelILExprCount(curr_func.handle())
+        };
+
+        // For each expression, attempt to get the HLIL instruction and add it to the result
+        for index in 0..expr_len {
+            if let Ok(instr) = HighLevelILInstruction::from_expr(curr_func.clone(), index, None) {
+                res.push(instr);
+            } 
+        }
+
+        // Sanity check we have all the instructions
+        assert!(expr_len == res.len() as u64, "Didn't find all HLIL expressions");
+
+        // Return the result
+        Ok(res)
+    }
+
     /// Returns all of the HLILSSA instructions for this function
     pub fn hlilssa_instructions(&self) -> Result<Vec<HighLevelILInstruction>> {
         let mut res = Vec::new();
@@ -290,6 +322,35 @@ impl Function {
             if filter(&bv, &instr) {
                 res.push(instr);
             }
+        }
+
+        // Return the result
+        Ok(res)
+    }
+
+    /// Return all HLIL expressions in the binary, filtered by the given filter function
+    pub fn hlil_expressions_filtered(&self, 
+            bv: &BinaryView,
+            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
+            -> Result<Vec<HighLevelILInstruction>> {
+        // Get the HLILSSA form of this function
+        let curr_func = self.hlil()?;
+
+        // Initialize the resulting Vec
+        let mut res = Vec::new();
+
+        // Get the number of expressions in this function
+        let expr_len = unsafe {
+            BNGetHighLevelILExprCount(curr_func.handle())
+        };
+
+        // For each expression, attempt to get the HLIL instruction and add it to the result
+        for index in 0..expr_len {
+            if let Ok(instr) = HighLevelILInstruction::from_expr(curr_func.clone(), index, None) {
+                if filter(&bv, &instr) {
+                    res.push(instr);
+                }
+            } 
         }
 
         // Return the result
@@ -427,6 +488,7 @@ impl fmt::Debug for Function {
     }
 }
 
+/*
 impl std::ops::Drop for Function {
     fn drop(&mut self) {
         // Stop any of the analysis requests if any are pending
@@ -436,11 +498,11 @@ impl std::ops::Drop for Function {
             }
         }
 
-        /*
         // Drop the created symbol if we have one
         if let Some(symbol) = &self.symbol {
+            print!("{}\n", symbol.name());
             drop(symbol);
         }
-        */
     }
 }
+*/

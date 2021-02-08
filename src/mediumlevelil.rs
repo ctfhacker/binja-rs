@@ -170,6 +170,11 @@ impl FunctionTrait for MediumLevelILFunction {
             Ok(result.iter().fold(String::new(), |acc, x| { format!("{}{}", acc, x.text) }))
         }
     }
+
+    /// Construct the text for a given MediumLevelILInstruction expression index
+    fn expr_text(&self, expr_index: u64) -> Result<String> {
+        panic!("Expr text not impl for MLIL");
+    }
 }
 
 #[derive(Clone)]
@@ -195,6 +200,10 @@ impl BasicBlockTrait for MediumLevelILBasicBlock {
 
     fn func(&self) -> Option<&Self::Func> {
         Some(&self.func)
+    }
+
+    fn raw_function(&self) -> Function {
+        self.func.function()
     }
 }
 
