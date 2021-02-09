@@ -33,6 +33,7 @@ pub mod highlevelil;
 pub mod binjalog;
 pub mod symbol;
 pub mod savesettings;
+pub mod plugin;
 
 /// Used to easily wrap an option around the BinjaCore calls
 ///

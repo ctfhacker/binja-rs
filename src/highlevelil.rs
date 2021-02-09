@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use crate::unsafe_try;
 use crate::function::Function;
+use crate::binjastr::BinjaStr;
 use crate::architecture::CoreArchitecture;
 use crate::basicblock::BasicBlock;
 use crate::il::{SSAVariable, Variable, Intrinsic, GotoLabel};
@@ -59,10 +60,14 @@ impl HighLevelILFunction {
         unsafe { BNGetHighLevelILInstructionCount(self.handle()) }
     }
 
-
     /// Get the architecture for this function
     pub fn arch(&self) -> Result<CoreArchitecture> {
         CoreArchitecture::new_from_func(**self.func)
+    }
+
+    /// Get the name of this function
+    pub fn name(&self) -> Option<BinjaStr> {
+        self.function().name()
     }
 
     fn get_index_for_instruction(&self, i: u64) -> u64 {
@@ -193,10 +198,10 @@ impl FunctionTrait for HighLevelILFunction {
         let mut res_lines: Vec<String> = Vec::new();
 
         unsafe { 
-            let lines = BNGetHighLevelILExprText(self.handle(), expr_index, /* as_ast */ true, 
-                                                 &mut count);
+            let lines = BNGetHighLevelILExprText(self.handle(), expr_index, 
+                /* as_ast */ true, &mut count);
 
-            if lines.is_null() || count == 0{
+            if lines.is_null() || count == 0 {
                 return Err(anyhow!("Failed to retrieve HLILInstruction tokens"));
             }
 
@@ -314,9 +319,9 @@ impl HighLevelILInstruction {
         let instr = unsafe { BNGetHighLevelILByIndex(func.handle(), expr_index, as_ast) };
 
         // Check if the expr_index is for a valid instruction
-        if unsafe { BNGetHighLevelILInstructionForExpr(func.handle(), expr_index) } == !0 && 
-            instr.address == 0 && instr.size == 0 && instr.operation == 0 {
-            return Err(anyhow!("Invalid instruction expr_index"));
+        if unsafe { BNGetHighLevelILInstructionForExpr(func.handle(), expr_index) } == !0 
+            && instr.address == 0 && instr.size == 0 && instr.operation == 0 {
+            return Err(anyhow!("Invalid instruction expr_index: {}", expr_index));
         }
 
         // If we have the instruction index, grab the text for that instruction

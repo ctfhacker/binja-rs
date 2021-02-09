@@ -29,6 +29,7 @@ use mediumlevelil::MediumLevelILInstruction;
 use highlevelil::HighLevelILInstruction;
 use symbol::Symbol;
 use savesettings::SaveSettings;
+use plugin::Plugins;
 
 /// Top level struct for accessing binary analysis functions
 #[derive(Clone)]
@@ -652,6 +653,29 @@ impl BinaryView {
         }
 
         Ok(())
+    }
+
+    /// Execute the `PDB\Load` command 
+    pub fn load_pdb(&self) -> Result<()> {
+        // Get the current list of loaded plugins
+        let plugins = Plugins::get_list();
+
+        for plugin in plugins.iter() {
+            // Look only for the `PDB\Load` 
+            if plugin.name() != "PDB\\Load" {
+                continue;
+            }
+
+            // Found the PDB Load command
+            print!("Found PDB Load\n");
+
+            // Execute the PBD load command
+            plugin.execute(&self);
+
+            return Ok(());
+        }
+
+        Err(anyhow!("Could not find PDB\\Load plugin"))
     }
 }
 

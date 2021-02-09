@@ -292,7 +292,7 @@ impl SSAVariable {
             // Initialize the resulting Vec
             let mut res = Vec::new();
 
-            print!("Xref func: {:#x}\n", self.var.func.start());
+            // print!("Xref func: {:#x}\n", self.var.func.start());
 
             // Get all of the HLILSSA xrefs of this function
             // let xrefs: Vec<_> = bv.get_code_refs(self.var.func.start()).iter()
