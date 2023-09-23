@@ -1,0 +1,4 @@
+[submodule "binaryninja-api"]
+	path = binja-sys/binaryninja-api
+	url = https://github.com/vector35/binaryninja-api
+	branch = dev
