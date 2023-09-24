@@ -1,8 +1,9 @@
 //! Provides various traits for abstracting over the various ILs Binary Ninja provides
-use core::*;
-use std::convert::TryInto;
-
 use anyhow::Result;
+use binja_sys::*;
+use log::*;
+
+use std::convert::TryInto;
 
 use crate::basicblock::BasicBlock;
 use crate::function::Function;

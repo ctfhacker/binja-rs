@@ -2,9 +2,10 @@
 #![allow(non_upper_case_globals)]
 #![allow(unused_assignments)]
 
-use core::*;
+use binja_sys::*;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use log::trace;
 
 use std::collections::HashMap;
 use std::convert::TryInto;

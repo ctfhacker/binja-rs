@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use core::*;
+use binja_sys::*;
 
 use crate::unsafe_try;
 use crate::wrappers::BinjaSaveSettings;

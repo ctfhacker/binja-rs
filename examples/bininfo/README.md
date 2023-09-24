@@ -39,3 +39,26 @@ Address [len]: Data
 0x4010ac [7]: freecon
 0x4010b4 [11]: lgetfilecon
 ```
+
+## With introspection
+
+Enable the `binja-rs/introspection` feature in `Cargo.toml` to enable the 
+performance introspection
+
+```
+Calculated OS frequency: 3911980960
+Total time: 6.76s    (26451425132 cycles)
+                            TIMER | HITS | TIMES
+Startup__InitPlugins              | 3    |     2027441169 cycles   7.66% |
+BinaryView__NewFromFilename       | 1    |      764439205 cycles   2.89% | (99.19% with child timers)
+BinaryView__Strings               | 1    |        4397314 cycles   0.02% |
+BinaryView__UpdateAnalysisAndWait | 1    |    23437405691 cycles  88.61% |
+BinaryView__EntryPoint            | 1    |           1068 cycles   0.00% |
+BinaryView__Len                   | 1    |          84688 cycles   0.00% |
+BinaryView__Start                 | 1    |            992 cycles   0.00% |
+BinaryView__Name                  | 1    |          12497 cycles   0.00% |
+BinaryView__TypeName              | 1    |           1654 cycles   0.00% |
+BinaryView__Open                  | 1    |        8006742 cycles   0.03% |
+BinaryView__AvailableViewTypes    | 1    |         242153 cycles   0.00% |
+Remainder                         |      |      209391959 cycles   0.79%
+```

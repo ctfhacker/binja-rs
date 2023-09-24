@@ -3,9 +3,10 @@
 #![allow(unused_assignments)]
 #![allow(unused_variables)]
 
-use core::*;
+use binja_sys::*;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use log::trace;
 
 use std::slice;
 use std::fmt;

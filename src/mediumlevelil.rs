@@ -7,9 +7,10 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 
-use core::*;
+use binja_sys::*;
+use log::trace;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use std::collections::HashMap;
 use std::convert::TryInto;

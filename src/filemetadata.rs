@@ -1,5 +1,5 @@
 //! Provides `FileMetadata` 
-use core::*;
+use binja_sys::*;
 
 use anyhow::Result;
 

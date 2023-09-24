@@ -1,5 +1,5 @@
 //! Provides `InstructionTextToken`
-use core::*;
+use binja_sys::*;
 
 use std::ffi::CStr;
 use std::fmt;

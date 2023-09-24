@@ -2,7 +2,8 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use log::{debug, info};
 
 use std::sync::Arc;
 
@@ -13,9 +14,9 @@ use crate::function::Function;
 use crate::highlevelil::{HighLevelILFunction, HighLevelILInstruction, HighLevelILOperation};
 use crate::mediumlevelil::{MediumLevelILInstruction, MediumLevelILOperation};
 use crate::wrappers::BinjaType;
-use core::{BNGetGotoLabelName, BNGetHighLevelILSSAVarDefinition};
-use core::{BNGetMediumLevelILSSAVarDefinition, BNGetMediumLevelILSSAVarUses};
-use core::{BNGetVariableName, BNGetVariableType, BNToVariableIdentifier, BNVariable};
+use binja_sys::{BNGetGotoLabelName, BNGetHighLevelILSSAVarDefinition};
+use binja_sys::{BNGetMediumLevelILSSAVarDefinition, BNGetMediumLevelILSSAVarUses};
+use binja_sys::{BNGetVariableName, BNGetVariableType, BNToVariableIdentifier, BNVariable};
 
 #[derive(Clone)]
 pub struct Register {
@@ -466,7 +467,7 @@ impl SSAVariable {
         let hlilssa = self.var.func.hlil()?.ssa_form()?;
 
         // Construct the BNVariable
-        let var = core::BNVariable {
+        let var = binja_sys::BNVariable {
             type_: self.var.var.type_,
             index: self.var.var.index,
             storage: self.var.var.storage,
@@ -618,7 +619,7 @@ impl SSAVariable {
         let mlilssa = self.var.func.mlilssa()?;
 
         // Construct the BNVariable
-        let var = core::BNVariable {
+        let var = binja_sys::BNVariable {
             type_: self.var.var.type_,
             index: self.var.var.index,
             storage: self.var.var.storage,
@@ -637,7 +638,7 @@ impl SSAVariable {
     /// Get the MLIL instruction(s) where this SSAVariable is used.
     pub fn mlil_uses(&self) -> Result<Vec<MediumLevelILInstruction>> {
         // Construct the BNVariable
-        let var = core::BNVariable {
+        let var = binja_sys::BNVariable {
             type_: self.var.var.type_,
             index: self.var.var.index,
             storage: self.var.var.storage,

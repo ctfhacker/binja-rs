@@ -5,5 +5,8 @@ authors = ["thebarbershopper <cld251@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-binja-rs = { path = "../../../binja-rs" }
 clap = { version = "4.4.4", features = ["derive"] }
+
+[dependencies.binja-rs]
+path = "../../../binja-rs"
+features = ["introspection"]

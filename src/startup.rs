@@ -1,5 +1,7 @@
 //! Provides functions dealing with initialization of the Binary Ninja Core
-use core::*;
+use binja_sys::*;
+use log::trace;
+
 use std::path::PathBuf;
 
 use crate::binjastr::BinjaStr;
@@ -35,6 +37,8 @@ pub fn get_os_plugin_path() -> PathBuf {
 
 /// Initialize plugins necessary to begin analysis
 pub fn init_plugins() {
+    timeloop::scoped_timer!(crate::Timer::Startup__InitPlugins);
+
     unsafe {
         if _INIT_PLUGINS {
             return;

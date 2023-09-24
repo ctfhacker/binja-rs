@@ -1,5 +1,5 @@
 //! Provides BasicBlock and analysis functions for Basic Blocks
-use core::*;
+use binja_sys::*;
 
 use anyhow::Result;
 

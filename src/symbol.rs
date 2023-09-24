@@ -1,5 +1,5 @@
 //! Provides `Symbol`
-use core::*;
+use binja_sys::*;
 
 use std::sync::Arc;
 

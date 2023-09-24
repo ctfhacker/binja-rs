@@ -1,5 +1,5 @@
 //! Provides bare minimum `Platform` support
-use core::*;
+use binja_sys::*;
 
 use std::sync::Arc;
 

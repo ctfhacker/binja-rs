@@ -1,5 +1,5 @@
 //! Provides custom type used for storing string references handed off by Binary Ninja core
-use core::*;
+use binja_sys::*;
 use std::borrow::{Cow, Borrow};
 use std::ffi::CStr;
 use std::hash::{Hash, Hasher};

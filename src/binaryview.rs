@@ -1,8 +1,8 @@
 //! Provides the top level `BinaryView` for analyzing binaries
-use core::*;
+use binja_sys::*;
 
-use anyhow::{Context, Result};
-
+use anyhow::{anyhow, Context, Result};
+use log::trace;
 use rayon::prelude::*;
 
 use std::borrow::Cow;
@@ -55,6 +55,7 @@ impl Drop for BinaryView {
         if crate::ACTIVE_BINARYVIEWS.fetch_sub(1, Ordering::SeqCst) == 1 {
             trace!("Dropping last active binary view. Shutting down binary ninja");
             unsafe { BNShutdown() }
+            timeloop::print!();
         }
     }
 }
@@ -77,6 +78,13 @@ impl BinaryView {
     /// assert_eq!(bv.has_functions(), true);
     /// ```
     pub fn new_from_filename(filename: &str) -> Result<BinaryView> {
+        // If this is the first binary view, start the profiler
+        if crate::ACTIVE_BINARYVIEWS.load(Ordering::SeqCst) == 0 {
+            timeloop::start_profiler!();
+        }
+
+        timeloop::scoped_timer!(crate::Timer::BinaryView__NewFromFilename);
+
         if !Path::new(filename).exists() {
             panic!("File not found: {}", filename);
         }
@@ -193,6 +201,8 @@ impl BinaryView {
     /// assert_eq!(first_string.start, 0x400238);
     /// ```
     pub fn strings(&self) -> Vec<StringReference> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Strings);
+
         let mut count = 0;
 
         unsafe {
@@ -210,31 +220,45 @@ impl BinaryView {
     }
 
     pub fn update_analysis_and_wait(&self) {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__UpdateAnalysisAndWait);
+
         unsafe { BNUpdateAnalysisAndWait(self.handle()) }
     }
 
     pub fn update_analysis(&self) {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__UpdateAnalysis);
+
         unsafe { BNUpdateAnalysis(self.handle()) }
     }
 
     pub fn entry_point(&self) -> u64 {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__EntryPoint);
+
         unsafe { BNGetEntryPoint(self.handle()) }
     }
 
     pub fn has_functions(&self) -> bool {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__HasFunctions);
+
         unsafe { BNHasFunctions(self.handle()) }
     }
 
     /// Retrieve the `filename` of the binary currently being analyzed
     pub fn name(&self) -> PathBuf {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Name);
+
         self.meta.filename()
     }
 
     pub fn len(&self) -> u64 {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Len);
+
         unsafe { BNGetViewLength(self.handle()) }
     }
 
     pub fn start(&self) -> u64 {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Start);
+
         unsafe { BNGetStartOffset(self.handle()) }
     }
 
@@ -246,6 +270,8 @@ impl BinaryView {
     /// assert_eq!(bv.type_name(), "ELF");
     /// ```
     pub fn type_name(&self) -> Cow<str> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__TypeName);
+
         unsafe {
             let name_ptr = BNGetViewType(self.handle());
             let name = CStr::from_ptr(name_ptr)
@@ -259,6 +285,8 @@ impl BinaryView {
 
     /// Open a BinaryDataView for the given
     fn open(filename: &str) -> Result<BinaryView> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Open);
+
         init_plugins();
 
         let metadata = FileMetadata::from_filename(filename)?;
@@ -305,6 +333,8 @@ impl BinaryView {
     }
 
     fn available_view_types(&self) -> Vec<BinaryViewType> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__AvailableViewTypes);
+
         let mut count = 0;
 
         unsafe {
@@ -323,11 +353,15 @@ impl BinaryView {
     }
 
     fn platform(&self) -> Option<Platform> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Platform);
+
         Platform::new(&self)
     }
 
     /// Get all LLIL instructions in the binary
     pub fn llil_instructions(&self) -> Vec<LowLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__LLILInstructions);
+
         let mut res = Vec::new();
 
         let all_instrs: Vec<Vec<LowLevelILInstruction>> = self
@@ -345,6 +379,7 @@ impl BinaryView {
 
     /// Get all LLIL instructions in the binary in parallel
     pub fn par_llil_instructions(&self) -> Vec<LowLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__ParLLILInstructions);
         let mut res = Vec::new();
 
         let all_instrs: Vec<Vec<LowLevelILInstruction>> = self

@@ -1,5 +1,5 @@
 //! Provides Architecture abstractions 
-use core::*;
+use binja_sys::*;
 
 use anyhow::Result;
 

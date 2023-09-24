@@ -14,10 +14,10 @@ pub enum LogLevel {
 
 /// Enable log to stdout
 pub fn to_stdout(level: LogLevel) {
-    unsafe { core::BNLogToStdout((level as u32).try_into().unwrap()); }
+    unsafe { binja_sys::BNLogToStdout((level as u32).try_into().unwrap()); }
 }
 
 /// Enable log to stderr
 pub fn to_stderr(level: LogLevel) {
-    unsafe { core::BNLogToStderr((level as u32).try_into().unwrap()); }
+    unsafe { binja_sys::BNLogToStderr((level as u32).try_into().unwrap()); }
 }

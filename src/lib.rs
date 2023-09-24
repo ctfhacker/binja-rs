@@ -1,15 +1,7 @@
 #![feature(type_ascription)]
 #![feature(associated_type_defaults)]
 
-extern crate binja_sys as core;
-
-#[macro_use]
-extern crate anyhow;
-extern crate rayon;
-
-// Good ole logging functionality
-#[macro_use]
-extern crate log;
+use anyhow::anyhow;
 
 pub mod architecture;
 pub mod basicblock;
@@ -39,6 +31,30 @@ use std::sync::atomic::AtomicU64;
 
 pub static ACTIVE_BINARYVIEWS: AtomicU64 = AtomicU64::new(0);
 
+timeloop::impl_enum!(
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub enum Timer {
+        Startup__InitPlugins,
+        BinaryView__NewFromFilename,
+        BinaryView__Strings,
+        BinaryView__UpdateAnalysisAndWait,
+        BinaryView__UpdateAnalysis,
+        BinaryView__EntryPoint,
+        BinaryView__ParLLILInstructions,
+        BinaryView__HasFunctions,
+        BinaryView__Len,
+        BinaryView__Start,
+        BinaryView__Name,
+        BinaryView__TypeName,
+        BinaryView__Open,
+        BinaryView__AvailableViewTypes,
+        BinaryView__LLILInstructions,
+        BinaryView__Platform,
+    }
+);
+
+timeloop::create_profiler!(Timer);
+
 /// Used to easily wrap an option around the BinjaCore calls
 ///
 /// Example:
@@ -57,7 +73,7 @@ macro_rules! unsafe_try {
 
             if res.is_null() {
                 // If the result is 0, return the anyhow error
-                Err(anyhow!("{} failed", stringify!($e)))
+                Err(crate::anyhow!("{} failed", stringify!($e)))
             } else {
                 // Otherwise return the result
                 Ok(res)

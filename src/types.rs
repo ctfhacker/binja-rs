@@ -1,5 +1,5 @@
 //! Provides miscellaneous types for analysis
-use core::*;
+use binja_sys::*;
 
 use std::sync::Arc;
 

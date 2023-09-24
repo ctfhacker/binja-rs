@@ -11,6 +11,11 @@ log = "0.4.0"
 env_logger = "0.8.2"
 rayon = "1.5.0"
 
+[dependencies.timeloop]
+path = "../timeloop"
+default-features = false
+features = ["disable"]
+
 # The testing profile, used for `cargo test`.
 [profile.test]
 opt-level = 0
@@ -23,3 +28,4 @@ panic = 'unwind'
 
 [features]
 default = []
+introspection = ["timeloop/enable"]

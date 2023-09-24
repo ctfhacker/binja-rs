@@ -1,5 +1,5 @@
 //! Provides abstractions over `StringReference` handled by Binary Ninja core
-use core::*;
+use binja_sys::*;
 
 use std::string::String;
 

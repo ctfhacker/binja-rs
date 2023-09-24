@@ -1,7 +1,7 @@
 //! Provides abstractions for `ReferenceSource` for cross references
 use anyhow::Result;
 
-use core::BNReferenceSource;
+use binja_sys::BNReferenceSource;
 
 use crate::function::Function;
 use crate::architecture::CoreArchitecture;

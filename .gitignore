@@ -4,6 +4,7 @@ target/
 **/target
 **/Cargo.lock
 binja-sys/binaryninja-api
+binja-sys/src/lib.rs
 **/*.rs.bk
 tags
 examples/*/target

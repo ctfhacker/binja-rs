@@ -4,7 +4,7 @@
 #![allow(non_camel_case_types)]
 #![allow(improper_ctypes)]
 
-use core::*;
+use binja_sys::*;
 
 use anyhow::{anyhow, Result};
 

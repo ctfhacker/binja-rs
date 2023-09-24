@@ -1,5 +1,5 @@
 //! Provides `Databuffer` used for handling byte buffers returned from Binary Ninja core
-use core::*;
+use binja_sys::*;
 
 use std::borrow::Cow;
 use std::string::String;

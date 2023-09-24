@@ -9,9 +9,9 @@
 //!     print!("Func {} @ {:#x}\n", func.name(), func.start());
 //! }
 //!
-use core::*;
+use binja_sys::*;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use std::convert::TryInto;
 use std::fmt;
