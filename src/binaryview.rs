@@ -220,25 +220,25 @@ impl BinaryView {
     }
 
     pub fn update_analysis_and_wait(&self) {
-        timeloop::scoped_timer!(crate::Timer::BinaryView__UpdateAnalysisAndWait);
+        timeloop::scoped_timer!(crate::Timer::BNUpdateAnalysisAndWait);
 
         unsafe { BNUpdateAnalysisAndWait(self.handle()) }
     }
 
     pub fn update_analysis(&self) {
-        timeloop::scoped_timer!(crate::Timer::BinaryView__UpdateAnalysis);
+        timeloop::scoped_timer!(crate::Timer::BNUpdateAnalysis);
 
         unsafe { BNUpdateAnalysis(self.handle()) }
     }
 
     pub fn entry_point(&self) -> u64 {
-        timeloop::scoped_timer!(crate::Timer::BinaryView__EntryPoint);
+        timeloop::scoped_timer!(crate::Timer::BNGetEntryPoint);
 
         unsafe { BNGetEntryPoint(self.handle()) }
     }
 
     pub fn has_functions(&self) -> bool {
-        timeloop::scoped_timer!(crate::Timer::BinaryView__HasFunctions);
+        timeloop::scoped_timer!(crate::Timer::BNHasFunctions);
 
         unsafe { BNHasFunctions(self.handle()) }
     }
@@ -251,13 +251,13 @@ impl BinaryView {
     }
 
     pub fn len(&self) -> u64 {
-        timeloop::scoped_timer!(crate::Timer::BinaryView__Len);
+        timeloop::scoped_timer!(crate::Timer::BNGetViewLength);
 
         unsafe { BNGetViewLength(self.handle()) }
     }
 
     pub fn start(&self) -> u64 {
-        timeloop::scoped_timer!(crate::Timer::BinaryView__Start);
+        timeloop::scoped_timer!(crate::Timer::BNGetStartOffset);
 
         unsafe { BNGetStartOffset(self.handle()) }
     }

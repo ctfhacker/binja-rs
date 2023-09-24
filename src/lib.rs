@@ -34,6 +34,32 @@ pub static ACTIVE_BINARYVIEWS: AtomicU64 = AtomicU64::new(0);
 timeloop::impl_enum!(
     #[derive(Debug, Copy, Clone, Eq, PartialEq)]
     pub enum Timer {
+        BNGetFunctionArchitecture,
+        BNGetArchitectureRegisterStackName,
+        BNGetBasicBlockImmediateDominator,
+        BNGetFileViewOfType,
+        BNOpenExistingDatabase,
+        BNCreateBinaryDataViewFromFilename,
+        BNGetSymbolByAddress,
+        BNCreateBinaryViewOfType,
+        BNCreateFileMetadata,
+        BNNewFunctionReference,
+        BNGetFunctionHighLevelIL,
+        BNGetHighLevelILSSAForm,
+        BNNewBasicBlockReference,
+        BNGetFunctionLowLevelIL,
+        BNGetLowLevelILSSAForm,
+        BNGetFunctionMediumLevelIL,
+        BNGetMediumLevelILSSAForm,
+        BNGetMediumLevelILBasicBlockForInstruction,
+        BNCreateSaveSettings,
+        BNUpdateAnalysisAndWait,
+        BNUpdateAnalysis,
+        BNGetEntryPoint,
+        BNHasFunctions,
+        BNGetViewLength,
+        BNGetStartOffset,
+
         Startup__InitPlugins,
         BinaryView__NewFromFilename,
         BinaryView__Strings,
@@ -66,10 +92,13 @@ timeloop::create_profiler!(Timer);
 /// }
 #[macro_export]
 macro_rules! unsafe_try {
-    ($e:expr) => {{
+    ($func:ident($($arg:expr),*)) => {{
+        timeloop::scoped_timer!(crate::Timer::$func);
+
         unsafe {
             // Call the given BinjaCore function
-            let res = $e;
+            // let res = $e;
+            let res = $func($($arg),*);
 
             if res.is_null() {
                 // If the result is 0, return the anyhow error

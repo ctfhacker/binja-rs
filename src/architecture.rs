@@ -1,16 +1,16 @@
-//! Provides Architecture abstractions 
+//! Provides Architecture abstractions
 use binja_sys::*;
 
 use anyhow::Result;
 
 use std::borrow::Cow;
-use std::sync::Arc;
-use std::ffi::CStr;
 use std::collections::HashMap;
+use std::ffi::CStr;
+use std::sync::Arc;
 
-use crate::unsafe_try;
 use crate::binjastr::BinjaStr;
 use crate::il::Register;
+use crate::unsafe_try;
 
 pub struct BinjaCoreArchitecture {
     ptr: *mut BNArchitecture,
@@ -32,7 +32,7 @@ impl std::ops::Deref for BinjaCoreArchitecture {
 
 #[derive(Clone)]
 pub struct CoreArchitecture {
-    handle: Arc<BinjaCoreArchitecture>
+    handle: Arc<BinjaCoreArchitecture>,
 }
 
 unsafe impl Send for CoreArchitecture {}
@@ -40,7 +40,9 @@ unsafe impl Sync for CoreArchitecture {}
 
 impl CoreArchitecture {
     pub fn new(handle: *mut BNArchitecture) -> CoreArchitecture {
-        CoreArchitecture { handle: Arc::new(BinjaCoreArchitecture::new(handle)) }
+        CoreArchitecture {
+            handle: Arc::new(BinjaCoreArchitecture::new(handle)),
+        }
     }
 
     pub fn new_from_func(func: *mut BNFunction) -> Result<CoreArchitecture> {
@@ -54,7 +56,7 @@ impl CoreArchitecture {
 
     /// Get the name of the architecture
     pub fn name(&self) -> Cow<'_, str> {
-        unsafe { 
+        unsafe {
             let ptr = BNGetArchitectureName(self.handle());
             CStr::from_ptr(ptr).to_string_lossy()
         }
@@ -67,25 +69,19 @@ impl CoreArchitecture {
 
     /// Get the name of `Register` of index `reg` for this architecture
     pub fn get_reg_name(&self, reg: u32) -> BinjaStr {
-        unsafe {
-            BinjaStr::new(BNGetArchitectureRegisterName(self.handle(), reg))
-        }
+        unsafe { BinjaStr::new(BNGetArchitectureRegisterName(self.handle(), reg)) }
     }
 
     /// Get the flag name of the given `flag` index
     pub fn get_flag_name(&self, flag: u32) -> Option<BinjaStr> {
         let flags = self.flags_by_index();
         let string = flags.get(&flag)?;
-        unsafe { 
-            Some(BinjaStr::new(BNAllocString(*string)))
-        }
+        unsafe { Some(BinjaStr::new(BNAllocString(*string))) }
     }
 
     /// Get the intrinsic name of the given `index`
     pub fn get_intrinsic_name(&self, index: u32) -> BinjaStr {
-        unsafe { 
-            BinjaStr::new(BNGetArchitectureIntrinsicName(self.handle(), index))
-        }
+        unsafe { BinjaStr::new(BNGetArchitectureIntrinsicName(self.handle(), index)) }
     }
 
     /// Get the register stack name for the register stack number
@@ -99,13 +95,13 @@ impl CoreArchitecture {
         // let mut flags = HashMap::new();
         let mut flags_by_index = HashMap::new();
 
-        unsafe { 
+        unsafe {
             let found_flags = BNGetAllArchitectureFlags(self.handle(), &mut count);
 
             let flags_slice = std::slice::from_raw_parts(found_flags, count as usize);
 
             for flag in flags_slice {
-                let name = BNGetArchitectureFlagName(self.handle(), *flag); 
+                let name = BNGetArchitectureFlagName(self.handle(), *flag);
                 // flags.insert(name, flag);
                 flags_by_index.insert(*flag, name);
             }
