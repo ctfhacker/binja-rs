@@ -10,13 +10,14 @@ use anyhow::Result;
 use std::slice;
 use std::fmt;
 use std::sync::Arc;
+use std::convert::TryInto;
 
 use crate::unsafe_try;
 use crate::function::Function;
 use crate::binjastr::BinjaStr;
 use crate::architecture::CoreArchitecture;
 use crate::basicblock::BasicBlock;
-use crate::il::{SSAVariable, Variable, Intrinsic, GotoLabel};
+use crate::il::{SSAVariable, Variable, Intrinsic, GotoLabel, ConstantData};
 use crate::instruction::InstructionTextToken;
 use crate::traits::{FunctionTrait, BasicBlockTrait};
 use crate::wrappers::{BinjaHighLevelILFunction, BinjaFunction, BinjaBasicBlock};
@@ -56,7 +57,7 @@ impl HighLevelILFunction {
     }
 
     /// Get the number of instructions in this function
-    pub fn len(&self) -> u64 {
+    pub fn len(&self) -> usize {
         unsafe { BNGetHighLevelILInstructionCount(self.handle()) }
     }
 
@@ -70,7 +71,7 @@ impl HighLevelILFunction {
         self.function().name()
     }
 
-    fn get_index_for_instruction(&self, i: u64) -> u64 {
+    fn get_index_for_instruction(&self, i: usize) -> usize {
         unsafe { BNGetHighLevelILIndexForInstruction(self.handle(), i) }
     }
 
@@ -86,7 +87,7 @@ impl HighLevelILFunction {
             -> Result<HighLevelILInstruction> {
         let expr_index = unsafe {
             BNGetHighLevelILSSAVarDefinition(self.handle(), &ssavar.var.var, 
-                ssavar.version as u64)
+                ssavar.version.try_into().unwrap())
         };
 
         print!("Expr index in func: {:#x}\n", expr_index);
@@ -95,7 +96,7 @@ impl HighLevelILFunction {
     }
 
     /// Get the total number of HLILSSA expressions in this function
-    pub fn expr_count(&self) -> u64 {
+    pub fn expr_count(&self) -> usize {
         unsafe {
             BNGetHighLevelILExprCount(self.handle())
         }
@@ -123,7 +124,7 @@ impl FunctionTrait for HighLevelILFunction {
     type Func  = HighLevelILFunction;
 
     /// Retrieve a HighLevelILInstruction for a given index
-    fn instruction(&self, i: u64) -> Result<Self::Ins> {
+    fn instruction(&self, i: usize) -> Result<Self::Ins> {
         HighLevelILInstruction::from_func_index(self.clone(), i)
     }
 
@@ -150,7 +151,7 @@ impl FunctionTrait for HighLevelILFunction {
     }
 
     /// Construct the text for a given HighLevelILInstruction index
-    fn text(&self, i: u64) -> Result<String> {
+    fn text(&self, i: usize) -> Result<String> {
         let mut count = 0;
 
         // Get the raw index for the given instruction index
@@ -160,8 +161,11 @@ impl FunctionTrait for HighLevelILFunction {
         let mut res_lines: Vec<String> = Vec::new();
 
         unsafe { 
-            let lines = BNGetHighLevelILExprText(self.handle(), expr_index, /* as_ast */ true, 
-                                                 &mut count);
+            let lines = BNGetHighLevelILExprText(self.handle(), 
+                                                 expr_index, 
+                                                /* as_ast */ true, 
+                                                 &mut count, 
+                                                 /* settings */ std::ptr::null_mut());
 
             if lines.is_null() || count == 0{
                 return Err(anyhow!("Failed to retrieve HLILInstruction tokens"));
@@ -191,15 +195,18 @@ impl FunctionTrait for HighLevelILFunction {
         Ok(res_lines.join("\n"))
     }
 
-    fn expr_text(&self, expr_index: u64) -> Result<String> {
+    fn expr_text(&self, expr_index: usize) -> Result<String> {
         let mut count = 0;
 
         // The resulting line texts
         let mut res_lines: Vec<String> = Vec::new();
 
         unsafe { 
-            let lines = BNGetHighLevelILExprText(self.handle(), expr_index, 
-                /* as_ast */ true, &mut count);
+            let lines = BNGetHighLevelILExprText(self.handle(), 
+                expr_index, 
+                /* as_ast */ true, 
+                &mut count,
+                /* settings */ std::ptr::null_mut());
 
             if lines.is_null() || count == 0 {
                 return Err(anyhow!("Failed to retrieve HLILInstruction tokens"));
@@ -272,12 +279,12 @@ unsafe impl Sync for HighLevelILBasicBlock {}
 pub struct HighLevelILInstruction {
     pub operation: Box<HighLevelILOperation>,
     pub source_operand: u32,
-    pub size: u64,
+    pub size: usize,
     pub operands: [u64; 5usize],
     pub address: u64,
     pub function: HighLevelILFunction,
-    pub expr_index: u64,
-    pub instr_index: u64,
+    pub expr_index: usize,
+    pub instr_index: usize,
     pub text: String,
     pub as_ast: bool
 }
@@ -303,7 +310,7 @@ impl HighLevelILInstruction {
     }
 
     /// Get the HLIL instruction from the given `func` at the given `instr_index`
-    pub fn from_func_index(func: HighLevelILFunction, instr_index: u64) -> Result<HighLevelILInstruction> { 
+    pub fn from_func_index(func: HighLevelILFunction, instr_index: usize) -> Result<HighLevelILInstruction> { 
         // Get the raw index for the given instruction index
         let expr_index = func.get_index_for_instruction(instr_index);
 
@@ -311,8 +318,8 @@ impl HighLevelILInstruction {
     }
 
     /// Get the HLIL instruction from the given internal `expr` at the given `instr_index`
-    pub fn from_expr(func: HighLevelILFunction, expr_index: u64, 
-            mut instr_index: Option<u64>) -> Result<HighLevelILInstruction> { 
+    pub fn from_expr(func: HighLevelILFunction, expr_index: usize, 
+            mut instr_index: Option<usize>) -> Result<HighLevelILInstruction> { 
         let as_ast = true;
 
         // Get the IL for the given index
@@ -441,6 +448,7 @@ pub enum HighLevelILOperation {
     ExternPtr { constant: u64, offset: u64, },
     FloatConst { constant: f64 },
     Import { constant: u64, },
+    ConstData { constant_data: ConstantData },
     Add { left: HighLevelILInstruction, right: HighLevelILInstruction, },
     Adc { left: HighLevelILInstruction, right: HighLevelILInstruction, carry: HighLevelILInstruction, },
     Sub { left: HighLevelILInstruction, right: HighLevelILInstruction, },
@@ -530,9 +538,10 @@ pub enum HighLevelILOperation {
     IntrinsicSsa { intrinsic: Intrinsic, params: Vec<HighLevelILInstruction>, dest_memory: u64, src_memory: u64, },
     VarPhi { dest: SSAVariable, src: Vec<SSAVariable>, },
     MemPhi { dest: u64, src: Vec<u64>, },
+    Unreachable,
 }
 impl HighLevelILOperation {
-    pub fn from_instr(instr: BNHighLevelILInstruction, func: &HighLevelILFunction, expr_index: u64)
+    pub fn from_instr(instr: BNHighLevelILInstruction, func: &HighLevelILFunction, expr_index: usize)
             -> Result<HighLevelILOperation> {
         let arch = func.arch().expect("Failed to get arch for HLIL").clone();
         let mut operand_index = 0;
@@ -540,7 +549,10 @@ impl HighLevelILOperation {
         // Macros used to define each of the types of arguments in each operation
         macro_rules! expr {
             () => {{
-                let res = HighLevelILInstruction::from_expr(func.clone(), instr.operands[operand_index], None)?;
+                let res = HighLevelILInstruction::from_expr(
+                    func.clone(), 
+                    instr.operands[operand_index].try_into().unwrap(), 
+                    None)?;
                 operand_index += 1;
                 res
             }}
@@ -583,7 +595,7 @@ impl HighLevelILOperation {
                 unsafe { 
                     // Get the pointer to instruction indexes from binja core
                     let operands = BNHighLevelILGetOperandList(func.handle(), expr_index, 
-                                                               operand_index as u64, &mut count);
+                                                               operand_index, &mut count);
 
                     operand_index += 2;
 
@@ -592,7 +604,7 @@ impl HighLevelILOperation {
 
                     // Create each instruction
                     for op in operands_slice {
-                        let i = HighLevelILInstruction::from_expr(func.clone(), *op, None)?;
+                        let i = HighLevelILInstruction::from_expr(func.clone(), (*op).try_into().unwrap(), None)?;
                         instrs.push(i);
                     }
 
@@ -612,7 +624,7 @@ impl HighLevelILOperation {
             
                 unsafe { 
                     let operands = BNHighLevelILGetOperandList(func.handle(), expr_index, 
-                                                            operand_index as u64, &mut count);
+                                                            operand_index, &mut count);
 
                     operand_index += 1;
 
@@ -629,6 +641,25 @@ impl HighLevelILOperation {
             }}
         }
 
+        macro_rules! constant_data {
+            () => {{
+                /*
+                print!("{:#x} {:#x}\n", 
+                    instr.operands[operand_index] & ((1 << 63) - 1),
+                    instr.operands[operand_index] & (1 << 63));
+                */
+
+                let state = instr.operands[operand_index];
+                operand_index += 1;
+
+                let value = instr.operands[operand_index];
+                operand_index += 1;
+
+                ConstantData::new(func.function(), state, value, instr.size)
+            }}
+        }
+
+
         macro_rules! var {
             () => {{
                 let bnvar = unsafe { BNFromVariableIdentifier(instr.operands[operand_index]) };
@@ -641,9 +672,9 @@ impl HighLevelILOperation {
         macro_rules! var_ssa {
             () => {{
                 let var = var!();
-                let version = instr.operands[operand_index] as u32;
+                let version = instr.operands[operand_index];
                 operand_index += 1;
-                SSAVariable::new(var, version)
+                SSAVariable::new(var, version.try_into().unwrap())
             }}
         }
 
@@ -654,7 +685,7 @@ impl HighLevelILOperation {
             
                 unsafe { 
                     let operands = BNHighLevelILGetOperandList(func.handle(), expr_index, 
-                                                                 operand_index as u64, &mut count);
+                                                               operand_index, &mut count);
 
                     operand_index += 2;
 
@@ -662,10 +693,10 @@ impl HighLevelILOperation {
 
                     for i in (0..count).step_by(2) {
                         let id      = operands_slice[i as usize];
-                        let version = operands_slice[i as usize + 1] as u32;
+                        let version = operands_slice[i as usize + 1];
                         let bnvar = BNFromVariableIdentifier(id);
                         let var = Variable::new(func.function(), bnvar);
-                        vars.push(SSAVariable::new(var, version));
+                        vars.push(SSAVariable::new(var, version.try_into().unwrap()));
                     }
 
                     BNHighLevelILFreeOperandList(operands);
@@ -880,6 +911,11 @@ impl HighLevelILOperation {
                 HighLevelILOperation::Const {
                     constant
                 }
+            }
+            BNHighLevelILOperation_HLIL_CONST_DATA => {
+                let constant_data = constant_data!();
+                HighLevelILOperation::ConstData { constant_data }
+
             }
             BNHighLevelILOperation_HLIL_CONST_PTR => {
                 let constant = int!();
@@ -1524,7 +1560,11 @@ impl HighLevelILOperation {
                     dest, src
                 }
             }
-            _ => unreachable!()
+            BNHighLevelILOperation_HLIL_UNREACHABLE => {
+                HighLevelILOperation::Unreachable {
+                }
+            }
+            x => panic!("Unimpl HLIL operation: {x}")
         })
     }
 
@@ -2930,6 +2970,12 @@ impl HighLevelILOperation {
             }
             res
         }
+        HighLevelILOperation::ConstData { /* constant_data */ constant_data: _ }=> {
+            Vec::new()
+        }
+        HighLevelILOperation::Unreachable {  }=> {
+            Vec::new()
+        }
 
         };
 
@@ -3058,6 +3104,8 @@ impl HighLevelILOperation {
             HighLevelILOperation::IntrinsicSsa {..} => "IntrinsicSsa".to_string(),
             HighLevelILOperation::VarPhi {..} => "VarPhi".to_string(),
             HighLevelILOperation::MemPhi {..} => "MemPhi".to_string(),
+            HighLevelILOperation::ConstData {..} => "ConstData".to_string(),
+            HighLevelILOperation::Unreachable => "Unreachable".to_string(),
         }
     }
 }

@@ -1,47 +1,51 @@
 #![feature(type_ascription)]
 #![feature(associated_type_defaults)]
-#![feature(in_band_lifetimes)]
 
 extern crate binja_sys as core;
 
-#[macro_use] extern crate anyhow;
+#[macro_use]
+extern crate anyhow;
 extern crate rayon;
 
 // Good ole logging functionality
 #[macro_use]
 extern crate log;
 
-pub mod binaryview;
-pub mod filemetadata;
-pub mod startup;
-pub mod binjastr;
-pub mod platform;
-pub mod types;
-pub mod function;
 pub mod architecture;
-pub mod reference;
-pub mod stringreference;
-pub mod databuffer;
-pub mod lowlevelil;
-pub mod instruction;
-pub mod traits;
 pub mod basicblock;
-pub mod wrappers;
-pub mod mediumlevelil;
-pub mod il;
-pub mod highlevelil;
+pub mod binaryview;
 pub mod binjalog;
-pub mod symbol;
-pub mod savesettings;
+pub mod binjastr;
+pub mod databuffer;
+pub mod filemetadata;
+pub mod function;
+pub mod highlevelil;
+pub mod il;
+pub mod instruction;
+pub mod lowlevelil;
+pub mod mediumlevelil;
+pub mod platform;
 pub mod plugin;
+pub mod reference;
+pub mod savesettings;
+pub mod startup;
+pub mod stringreference;
+pub mod symbol;
+pub mod traits;
+pub mod types;
+pub mod wrappers;
+
+use std::sync::atomic::AtomicU64;
+
+pub static ACTIVE_BINARYVIEWS: AtomicU64 = AtomicU64::new(0);
 
 /// Used to easily wrap an option around the BinjaCore calls
 ///
 /// Example:
 ///
 /// pub fn new() -> Result<FileMetadata> {
-///     let meta = FileMetadata{ 
-///         handle: unsafe_try!(BNCreateFileMetadata())? 
+///     let meta = FileMetadata{
+///         handle: unsafe_try!(BNCreateFileMetadata())?
 ///     }
 /// }
 #[macro_export]
@@ -59,6 +63,5 @@ macro_rules! unsafe_try {
                 Ok(res)
             }
         }
-    }}
+    }};
 }
-

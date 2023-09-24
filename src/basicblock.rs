@@ -3,27 +3,27 @@ use core::*;
 
 use anyhow::Result;
 
-use std::sync::Arc;
 use std::convert::TryInto;
+use std::sync::Arc;
 
-use crate::unsafe_try;
+use crate::function::Function;
 use crate::lowlevelil::LowLevelILBasicBlock;
 use crate::mediumlevelil::MediumLevelILBasicBlock;
-use crate::function::Function;
-use crate::wrappers::BinjaBasicBlock;
 use crate::traits::*;
+use crate::unsafe_try;
+use crate::wrappers::BinjaBasicBlock;
 
 #[derive(Clone)]
 pub struct BasicBlock {
     handle: Arc<BinjaBasicBlock>,
-    pub func: Function
+    pub func: Function,
 }
 
 impl BasicBlock {
     pub fn new(handle: *mut BNBasicBlock, func: Function) -> BasicBlock {
         BasicBlock {
             handle: Arc::new(BinjaBasicBlock::new(handle)),
-            func
+            func,
         }
     }
 
@@ -76,7 +76,11 @@ impl BasicBlock {
     pub fn print_mlilssa(&self) {
         if let Ok(mlilbb) = self.mlil() {
             for instr in mlilbb.il() {
-                print!("{:#x}: {}\n", instr.ssa_form().unwrap().address, instr.ssa_form().unwrap());
+                print!(
+                    "{:#x}: {}\n",
+                    instr.ssa_form().unwrap().address,
+                    instr.ssa_form().unwrap()
+                );
             }
         }
     }
@@ -84,7 +88,8 @@ impl BasicBlock {
     /// Get the total number of edges for this basic block
     pub fn total_edges(&self) -> u64 {
         let mut res = 0;
-        unsafe { 
+
+        unsafe {
             let mut count = 0;
 
             // Get the outgoing edges from the core
@@ -100,7 +105,7 @@ impl BasicBlock {
             res += count;
         }
 
-        res
+        res.try_into().unwrap()
     }
 
     /// Get the list of outgoing edges from this basic block
@@ -109,7 +114,7 @@ impl BasicBlock {
 
         let mut res = Vec::new();
 
-        unsafe { 
+        unsafe {
             // Get the outgoing edges from the core
             let edges = BNGetBasicBlockOutgoingEdges(self.handle(), &mut count);
 
@@ -134,7 +139,7 @@ impl BasicBlock {
 
         let mut res = Vec::new();
 
-        unsafe { 
+        unsafe {
             // Get the outgoing edges from the core
             let edges = BNGetBasicBlockIncomingEdges(self.handle(), &mut count);
 
@@ -183,7 +188,6 @@ impl BasicBlock {
             for block in blocks_slice {
                 res.push(BasicBlock::new(*block, self.func.clone()));
             }
-
         }
 
         res
@@ -289,15 +293,20 @@ impl BasicBlock {
 
 impl std::cmp::PartialEq for BasicBlock {
     fn eq(&self, other: &Self) -> bool {
-        (self.start(), self.end(), self.func.start()) == 
-            (other.start(), other.end(), other.func.start()) 
+        (self.start(), self.end(), self.func.start())
+            == (other.start(), other.end(), other.func.start())
     }
 }
 
 impl std::fmt::Debug for BasicBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "<BasicBlock func: {:?}, start: {:#x}, len: {}>", 
-               self.func.name(), self.start(), self.len())
+        write!(
+            f,
+            "<BasicBlock func: {:?}, start: {:#x}, len: {}>",
+            self.func.name(),
+            self.start(),
+            self.len()
+        )
     }
 }
 
@@ -319,22 +328,23 @@ enum BasicBlockEdgeType {
 impl BasicBlockEdgeType {
     pub fn from_u32(val: u32) -> Self {
         match val {
-             0 => BasicBlockEdgeType::UnconditionalBranch,
-             1 => BasicBlockEdgeType::FalseBranch,
-             2 => BasicBlockEdgeType::TrueBranch,
-             3 => BasicBlockEdgeType::CallDestination,
-             4 => BasicBlockEdgeType::FunctionReturn,
-             5 => BasicBlockEdgeType::SystemCall,
-             6 => BasicBlockEdgeType::IndirectBranch,
-             7 => BasicBlockEdgeType::ExceptionBranch,
-             127 => BasicBlockEdgeType::UnresolvedBranch,
-             128 => BasicBlockEdgeType::UserDefinedBranch,
-             _ => panic!("Unknown BasicBlockEdge: {}\n", val)
+            0 => BasicBlockEdgeType::UnconditionalBranch,
+            1 => BasicBlockEdgeType::FalseBranch,
+            2 => BasicBlockEdgeType::TrueBranch,
+            3 => BasicBlockEdgeType::CallDestination,
+            4 => BasicBlockEdgeType::FunctionReturn,
+            5 => BasicBlockEdgeType::SystemCall,
+            6 => BasicBlockEdgeType::IndirectBranch,
+            7 => BasicBlockEdgeType::ExceptionBranch,
+            127 => BasicBlockEdgeType::UnresolvedBranch,
+            128 => BasicBlockEdgeType::UserDefinedBranch,
+            _ => panic!("Unknown BasicBlockEdge: {}\n", val),
         }
     }
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct BasicBlockEdge {
     type_: BasicBlockEdgeType,
     target: BasicBlock,
@@ -348,8 +358,7 @@ impl BasicBlockEdge {
             type_: BasicBlockEdgeType::from_u32(edge.type_.try_into().unwrap()),
             target: BasicBlock::new(edge.target, func),
             back_edge: edge.backEdge,
-            fall_through: edge.fallThrough
+            fall_through: edge.fallThrough,
         }
     }
 }
-

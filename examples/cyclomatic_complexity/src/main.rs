@@ -1,29 +1,19 @@
-#[macro_use]
-extern crate clap;
-extern crate binja_rs;
-extern crate anyhow;
-extern crate rayon;
-
 use anyhow::Result;
+use clap::Parser;
 use rayon::prelude::*;
-use clap::{App, Arg};
 
 use binja_rs::binaryview::BinaryView;
 use binja_rs::traits::*;
 
-fn main() -> Result<()> {
-    let matches = App::new("Binja cyclomatic_complexity")
-                    .version("0.1")
-                    .author("@ctfhacker")
-                    .about("Dumping the cyclomatic complexity of all functions")
-                    .arg(Arg::with_name("INPUT")
-                        .help("Binary file to analyze")
-                        .required(true)
-                        .index(1))
-                    .get_matches();
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    input: String,
+}
 
-    let filename = matches.value_of("INPUT").unwrap();
-    let bv = BinaryView::new_from_filename(filename).unwrap();
+fn main() -> Result<()> {
+    let args = Args::parse();
+    let bv = BinaryView::new_from_filename(&args.input).unwrap();
 
     let mut function_connections = Vec::new();
     let mut bb_connections = Vec::new();
@@ -32,7 +22,12 @@ fn main() -> Result<()> {
         let callees = func.callees(&bv)?.len();
         let callers = func.callers(&bv).len();
 
-        // print!("Func: {:?} callees: {} callers: {}\n", func.name(), callees, callers);
+        print!(
+            "Func: {:?} callees: {} callers: {}\n",
+            func.name(),
+            callees,
+            callers
+        );
 
         function_connections.push((callees + callers, func.clone()));
 

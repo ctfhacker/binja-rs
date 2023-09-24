@@ -1,4 +1,4 @@
-//! Provides analysis for functions in a binary as well as an entry point into the LLIL, MLIL, 
+//! Provides analysis for functions in a binary as well as an entry point into the LLIL, MLIL,
 //! and HLIL functions
 //!
 //! Example:
@@ -13,24 +13,26 @@ use core::*;
 
 use anyhow::Result;
 
+use std::convert::TryInto;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::unsafe_try;
-use crate::binaryview::BinaryView;
-use crate::symbol::{Symbol, SymbolType};
-use crate::binjastr::BinjaStr;
 use crate::architecture::CoreArchitecture;
+use crate::basicblock::BasicBlock;
+use crate::binaryview::BinaryView;
+use crate::binjastr::BinjaStr;
+use crate::highlevelil::{HighLevelILFunction, HighLevelILInstruction};
 use crate::lowlevelil::{LowLevelILFunction, LowLevelILInstruction};
 use crate::mediumlevelil::{MediumLevelILFunction, MediumLevelILInstruction};
-use crate::highlevelil::{HighLevelILFunction, HighLevelILInstruction};
-use crate::wrappers::BinjaFunction;
-use crate::traits::{FunctionTrait, BasicBlockTrait};
 use crate::reference::ReferenceSource;
-use crate::basicblock::BasicBlock;
+use crate::symbol::{Symbol, SymbolType};
+use crate::traits::{BasicBlockTrait, FunctionTrait};
+use crate::unsafe_try;
+use crate::wrappers::BinjaFunction;
 
 /// Struct helping analyzing a particular function
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Function {
     handle: Arc<BinjaFunction>,
     advanced_analysis_requests: u64,
@@ -58,12 +60,12 @@ impl Function {
             curr_symbol = Some(symbol);
         }
 
-        Ok(Function { 
+        Ok(Function {
             handle: Arc::new(BinjaFunction::new(handle)),
             advanced_analysis_requests: 0,
             symbol: curr_symbol,
             start,
-            symbol_type
+            symbol_type,
         })
     }
 
@@ -80,12 +82,12 @@ impl Function {
             curr_symbol = Some(symbol);
         }
 
-        Function { 
+        Function {
             handle: func,
             advanced_analysis_requests: 0,
             symbol: curr_symbol,
             start,
-            symbol_type
+            symbol_type,
         }
     }
 
@@ -132,7 +134,7 @@ impl Function {
 
         print!("Blocks start... ");
 
-        unsafe { 
+        unsafe {
             let blocks = BNGetFunctionBasicBlockList(self.handle(), &mut count);
             let blocks_slice = std::slice::from_raw_parts(blocks, count as usize);
             for block in blocks_slice {
@@ -241,19 +243,21 @@ impl Function {
         let mut res = Vec::new();
 
         // Get the number of expressions in this function
-        let expr_len = unsafe {
-            BNGetHighLevelILExprCount(curr_func.handle())
-        };
+        let expr_len = unsafe { BNGetHighLevelILExprCount(curr_func.handle()) };
 
         // For each expression, attempt to get the HLIL instruction and add it to the result
         for index in 0..expr_len {
-            if let Ok(instr) = HighLevelILInstruction::from_expr(curr_func.clone(), index, None) {
+            if let Ok(instr) = HighLevelILInstruction::from_expr(
+                curr_func.clone(),
+                index.try_into().unwrap(),
+                None,
+            ) {
                 res.push(instr);
-            } 
+            }
         }
 
         // Sanity check we have all the instructions
-        assert!(expr_len == res.len() as u64, "Didn't find all HLIL expressions");
+        assert!(expr_len == res.len(), "Didn't find all HLIL expressions");
 
         // Return the result
         Ok(res)
@@ -282,29 +286,32 @@ impl Function {
         let mut res = Vec::new();
 
         // Get the number of expressions in this function
-        let expr_len = unsafe {
-            BNGetHighLevelILExprCount(curr_func.handle())
-        };
+        let expr_len = unsafe { BNGetHighLevelILExprCount(curr_func.handle()) };
 
         // For each expression, attempt to get the HLIL instruction and add it to the result
         for index in 0..expr_len {
-            if let Ok(instr) = HighLevelILInstruction::from_expr(curr_func.clone(), index, None) {
+            if let Ok(instr) = HighLevelILInstruction::from_expr(
+                curr_func.clone(),
+                index.try_into().unwrap(),
+                None,
+            ) {
                 res.push(instr);
-            } 
+            }
         }
 
         // Sanity check we have all the instructions
-        assert!(expr_len == res.len() as u64, "Didn't find all HLILSSA expressions");
+        assert!(expr_len == res.len(), "Didn't find all HLILSSA expressions");
 
         // Return the result
         Ok(res)
     }
 
     /// Return all MLIL expressions in the binary, filtered by the given filter function
-    pub fn mlilssa_expressions_filtered(&self, 
-            bv: &BinaryView,
-            filter: &(dyn Fn(&BinaryView, &MediumLevelILInstruction) -> bool + 'static + Sync))
-            -> Result<Vec<MediumLevelILInstruction>> {
+    pub fn mlilssa_expressions_filtered(
+        &self,
+        bv: &BinaryView,
+        filter: &(dyn Fn(&BinaryView, &MediumLevelILInstruction) -> bool + 'static + Sync),
+    ) -> Result<Vec<MediumLevelILInstruction>> {
         // Get the HLILSSA form of this function
         let curr_func = self.mlil()?.ssa_form()?;
 
@@ -316,8 +323,11 @@ impl Function {
 
         // For each expression, attempt to get the MLIL instruction and add it to the result
         for index in 0..expr_len {
-            let instr = MediumLevelILInstruction::from_expr(curr_func.clone(), 
-                    index, None);
+            let instr = MediumLevelILInstruction::from_expr(
+                curr_func.clone(),
+                index.try_into().unwrap(),
+                None,
+            );
 
             if filter(&bv, &instr) {
                 res.push(instr);
@@ -329,10 +339,11 @@ impl Function {
     }
 
     /// Return all HLIL expressions in the binary, filtered by the given filter function
-    pub fn hlil_expressions_filtered(&self, 
-            bv: &BinaryView,
-            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
-            -> Result<Vec<HighLevelILInstruction>> {
+    pub fn hlil_expressions_filtered(
+        &self,
+        bv: &BinaryView,
+        filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync),
+    ) -> Result<Vec<HighLevelILInstruction>> {
         // Get the HLILSSA form of this function
         let curr_func = self.hlil()?;
 
@@ -340,17 +351,19 @@ impl Function {
         let mut res = Vec::new();
 
         // Get the number of expressions in this function
-        let expr_len = unsafe {
-            BNGetHighLevelILExprCount(curr_func.handle())
-        };
+        let expr_len = unsafe { BNGetHighLevelILExprCount(curr_func.handle()) };
 
         // For each expression, attempt to get the HLIL instruction and add it to the result
         for index in 0..expr_len {
-            if let Ok(instr) = HighLevelILInstruction::from_expr(curr_func.clone(), index, None) {
+            if let Ok(instr) = HighLevelILInstruction::from_expr(
+                curr_func.clone(),
+                index.try_into().unwrap(),
+                None,
+            ) {
                 if filter(&bv, &instr) {
                     res.push(instr);
                 }
-            } 
+            }
         }
 
         // Return the result
@@ -358,10 +371,11 @@ impl Function {
     }
 
     /// Return all HLIL expressions in the binary, filtered by the given filter function
-    pub fn hlilssa_expressions_filtered(&self, 
-            bv: &BinaryView,
-            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
-            -> Result<Vec<HighLevelILInstruction>> {
+    pub fn hlilssa_expressions_filtered(
+        &self,
+        bv: &BinaryView,
+        filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync),
+    ) -> Result<Vec<HighLevelILInstruction>> {
         // Get the HLILSSA form of this function
         let curr_func = self.hlil()?.ssa_form()?;
 
@@ -369,17 +383,19 @@ impl Function {
         let mut res = Vec::new();
 
         // Get the number of expressions in this function
-        let expr_len = unsafe {
-            BNGetHighLevelILExprCount(curr_func.handle())
-        };
+        let expr_len = unsafe { BNGetHighLevelILExprCount(curr_func.handle()) };
 
         // For each expression, attempt to get the HLIL instruction and add it to the result
         for index in 0..expr_len {
-            if let Ok(instr) = HighLevelILInstruction::from_expr(curr_func.clone(), index, None) {
+            if let Ok(instr) = HighLevelILInstruction::from_expr(
+                curr_func.clone(),
+                index.try_into().unwrap(),
+                None,
+            ) {
                 if filter(&bv, &instr) {
                     res.push(instr);
                 }
-            } 
+            }
         }
 
         // Return the result
@@ -387,10 +403,11 @@ impl Function {
     }
 
     /// Return all HLIL instructions in the binary, filtered by the given filter function
-    pub fn hlil_instructions_filtered(&self, 
-            bv: &BinaryView,
-            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
-            -> Result<Vec<HighLevelILInstruction>> {
+    pub fn hlil_instructions_filtered(
+        &self,
+        bv: &BinaryView,
+        filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync),
+    ) -> Result<Vec<HighLevelILInstruction>> {
         let mut res = Vec::new();
 
         for bb in self.hlil()?.blocks() {
@@ -405,27 +422,28 @@ impl Function {
     }
 
     pub fn get_low_level_il_at(&self, addr: u64) -> Result<LowLevelILInstruction> {
-        let index = unsafe {
-            BNGetLowLevelILForInstruction(self.handle(), self.arch()?.handle(), addr)
-        };
-    
+        let index =
+            unsafe { BNGetLowLevelILForInstruction(self.handle(), self.arch()?.handle(), addr) };
+
         if index >= self.llil()?.len() {
-            return Err(anyhow!("LLIL instruction index is not in the LLIL instructions"));
+            return Err(anyhow!(
+                "LLIL instruction index is not in the LLIL instructions"
+            ));
         }
 
         Ok(LowLevelILInstruction::from_func_index(self.llil()?, index))
     }
 
     /// Returns possible call sites contained in this function.
-    /// This includes ordinary calls, tail calls, and indirect jumps. Not all of the 
-    /// returned call sites are necessarily true call sites; some may simply be 
+    /// This includes ordinary calls, tail calls, and indirect jumps. Not all of the
+    /// returned call sites are necessarily true call sites; some may simply be
     /// unresolved indirect jumps, for example.
     pub fn call_sites(&self) -> Vec<ReferenceSource> {
         let mut count = 0;
 
         let mut res = Vec::new();
 
-        unsafe { 
+        unsafe {
             let xrefs = BNGetFunctionCallSites(self.handle(), &mut count);
             let xrefs_slice = std::slice::from_raw_parts(xrefs, count as usize);
             for xref in xrefs_slice {
@@ -474,11 +492,11 @@ impl fmt::Debug for Function {
 
         if let Some(symbol_type) = &self.symbol_type {
             result.field("symbol_type", &format!("{:?}", symbol_type));
-        } 
+        }
 
         if let Some(symbol) = &self.symbol {
             result.field("symbol", &symbol.name());
-        } 
+        }
 
         if let Some(name) = self.name() {
             result.field("name", &name);

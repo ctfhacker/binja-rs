@@ -2,9 +2,10 @@
 name = "llil_parser"
 version = "0.1.0"
 authors = ["thebarbershopper <cld251@gmail.com>"]
+edition = "2021"
 
 [dependencies]
+anyhow = "1.0.75"
 binja-rs = { path = "../../../binja-rs" }
-clap = "*"
-anyhow = "*"
-rayon = "*"
+clap = { version = "4.4.4", features = ["derive"] }
+rayon = "1.8.0"

@@ -2,12 +2,13 @@
 use core::*;
 
 use std::sync::Arc;
-use binaryview::BinaryView;
-use wrappers::BinjaPlatform;
+
+use crate::binaryview::BinaryView;
+use crate::wrappers::BinjaPlatform;
 
 #[derive(Clone)]
 pub struct Platform {
-    pub handle: Arc<BinjaPlatform>
+    pub handle: Arc<BinjaPlatform>,
 }
 
 impl Platform {
@@ -23,10 +24,14 @@ impl Platform {
         }
         */
         let handle = unsafe {
-            BNGetDefaultPlatform(bv.handle()).as_mut().expect("BNGetDefaultPlatform failed")
+            BNGetDefaultPlatform(bv.handle())
+                .as_mut()
+                .expect("BNGetDefaultPlatform failed")
         };
 
-        Some( Platform{ handle: Arc::new(BinjaPlatform::new(handle)) } )
+        Some(Platform {
+            handle: Arc::new(BinjaPlatform::new(handle)),
+        })
     }
 
     pub fn handle(&self) -> *mut BNPlatform {

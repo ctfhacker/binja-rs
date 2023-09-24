@@ -1,41 +1,38 @@
-extern crate clap;
-extern crate binja_rs;
-extern crate anyhow;
-// extern crate rayon;
+use std::collections::VecDeque;
+use std::path::Path;
 
-use clap::{App, Arg};
+use clap::Parser;
 
 use binja_rs::binaryview::BinaryView;
 use binja_rs::highlevelil::HighLevelILOperation;
 use binja_rs::highlevelil::HighLevelILOperation::*;
 
-fn main() {
-    let matches = App::new("Binja back_slice")
-                    .version("0.1")
-                    .author("@ctfhacker")
-                    .about("Example of how back slicing could work")
-                    .arg(Arg::with_name("INPUT")
-                        .help("Binary file to analyze")
-                        .required(true)
-                        .index(1))
-                    .get_matches();
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    input: String,
+}
 
-    let filename = matches.value_of("INPUT").unwrap();
-    let bv = BinaryView::new_from_filename(filename).unwrap();
+fn main() {
+    let args = Args::parse();
+
+    let bv = BinaryView::new_from_filename(&args.input).unwrap();
 
     // Get all the HLILSSA expressions in the binary
     let exprs = bv.hlilssa_expressions();
     print!("Exprs: {}\n", exprs.len());
 
-    let mut instrs = Vec::new();
+    let mut instrs = VecDeque::new();
 
-    // Filter all the HLILSSA instructions 
+    // Filter all the HLILSSA instructions
     for instr in exprs {
-        if matches!(*instr.operation, HighLevelILOperation::Tailcall {..}) {
+        /*
+        if matches!(*instr.operation, HighLevelILOperation::Tailcall { .. }) {
             instrs.push(vec![instr.clone()]);
         }
-        if matches!(*instr.operation, HighLevelILOperation::Call {..}) {
-            instrs.push(vec![instr.clone()]);
+        */
+        if matches!(*instr.operation, HighLevelILOperation::Call { .. }) {
+            instrs.push_back(vec![instr.clone()]);
         }
         /*
         if matches!(*instr.operation, HighLevelILOperation::CallSsa {..}) {
@@ -53,8 +50,10 @@ fn main() {
     // Start the queue loop processing each slice one at a time, looking for the
     // end condition
     'top: loop {
+        println!("Instrs left: {}", instrs.len());
+
         // Get the next slice to process
-        let curr_slice = instrs.pop();
+        let curr_slice = instrs.pop_front();
 
         // If there are no more slices to process, we are done!
         if curr_slice.is_none() {
@@ -72,14 +71,20 @@ fn main() {
 
         // This loop will walk the HLIL Operation tree looking for the Operation filter
         // that we care about. The `check` variable is reassigned each iteration, going
-        // deeper into the tree. This loop is just an example and would be further 
+        // deeper into the tree. This loop is just an example and would be further
         // fleshed out in more useful plugins.
         loop {
             match &*check.operation {
-                Assign { src, .. } => { check = src; }
-                AssignMemSsa { dest, .. } => { check = dest; }
-                DerefSsa { src, .. } => { check = src; }
-                Add { left, right } => { 
+                Assign { src, .. } => {
+                    check = src;
+                }
+                AssignMemSsa { dest, .. } => {
+                    check = dest;
+                }
+                DerefSsa { src, .. } => {
+                    check = src;
+                }
+                Add { left, right } => {
                     if let Const { constant } = &*left.operation {
                         if *constant == 8 {
                             result.push(curr_slice);
@@ -109,7 +114,7 @@ fn main() {
                         }
                     }
                 }
-                _ => break
+                _ => break,
             }
 
             // Sanity limit on how far to recurse into the tree in case we are in a loop
@@ -119,18 +124,18 @@ fn main() {
             }
         }
 
-        /*
         if curr_slice.len() > 16 {
-            break;
+            println!("Curr slice too long.. next one");
+            result.push(curr_slice);
+            continue;
         }
-        */
 
         // Last instruction didn't match our filter, so continue slicing backwards
         if let Some(vars) = curr_instr.ssa_vars() {
             for ssa_var in vars {
-                // Get the list of xref_slices. This holds a vector for each 
+                // Get the list of xref_slices. This holds a vector for each
                 // definition. This also will attempt to slice backwards through
-                // a function using the `arg#` as an indicator of which call 
+                // a function using the `arg#` as an indicator of which call
                 // parameter to slice with.
                 let def = ssa_var.hlil_definition(&bv);
 
@@ -157,11 +162,11 @@ fn main() {
                     if !curr_slice.contains(&src) {
                         let mut new_slice = curr_slice.clone();
                         new_slice.push(src);
-                        instrs.push(new_slice);
+                        instrs.push_front(new_slice);
                     }
                 }
             }
-        } 
+        }
     }
 
     // For each resulting slice, dump it to the screen
@@ -174,8 +179,14 @@ fn main() {
                 "???".to_string()
             };
 
-            print!("[{}/{}][{:#x}:{}] {}\n", i + 1, slice.len(), instr.address, 
-                func_name, instr);
+            print!(
+                "[{}/{}][{:#x}:{}] {}\n",
+                i + 1,
+                slice.len(),
+                instr.address,
+                func_name,
+                instr
+            );
         }
     }
 

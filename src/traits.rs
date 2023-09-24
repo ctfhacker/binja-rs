@@ -1,5 +1,6 @@
 //! Provides various traits for abstracting over the various ILs Binary Ninja provides
 use core::*;
+use std::convert::TryInto;
 
 use anyhow::Result;
 
@@ -8,19 +9,19 @@ use crate::function::Function;
 
 pub trait FunctionTrait {
     type Ins;
-    type Block: BasicBlockTrait<Ins=Self::Ins>;
+    type Block: BasicBlockTrait<Ins = Self::Ins>;
     type Func;
 
-    fn instruction(&self, i: u64) -> Result<Self::Ins>;
+    fn instruction(&self, i: usize) -> Result<Self::Ins>;
     fn blocks(&self) -> Vec<Self::Block>;
 
     fn ssa_form(&self) -> Result<Self::Func>;
-    fn ssa(&self) -> Result<Self::Func> { 
-        self.ssa_form() 
+    fn ssa(&self) -> Result<Self::Func> {
+        self.ssa_form()
     }
 
-    fn text(&self, i: u64) -> Result<String>;
-    fn expr_text(&self, expr_index: u64) -> Result<String>;
+    fn text(&self, i: usize) -> Result<String>;
+    fn expr_text(&self, expr_index: usize) -> Result<String>;
 
     /*
     /// Retrieve all of the IL for the current function
@@ -34,7 +35,7 @@ pub trait FunctionTrait {
 
 pub trait BasicBlockTrait {
     type Ins;
-    type Func: FunctionTrait<Ins=Self::Ins>;
+    type Func: FunctionTrait<Ins = Self::Ins>;
 
     /// Getter for handle in order to default implement start() and end()
     fn handle(&self) -> *mut BNBasicBlock;
@@ -45,28 +46,29 @@ pub trait BasicBlockTrait {
     fn raw_function(&self) -> Function;
 
     /// Get the start index of a basic block
-    fn start(&self) -> u64 {
+    fn start(&self) -> usize {
         let res = unsafe { BNGetBasicBlockStart(self.handle()) };
         trace!("BB Start: {}\n", res);
-        res
+        res.try_into().unwrap()
     }
 
     /// Get the end index of a basic block
-    fn end(&self) -> u64 {
+    fn end(&self) -> usize {
         let res = unsafe { BNGetBasicBlockEnd(self.handle()) };
         trace!("BB End: {}\n", res);
-        res
+        res.try_into().unwrap()
     }
 
     /// Get the length of the basic block
-    fn len(&self) -> u64 {
+    fn len(&self) -> usize {
         self.end() - self.start()
     }
 
     /// Default implementation on getting the IL for a particular basic block
     fn il(&self) -> Vec<Self::Ins> {
-        let result = (self.start()..self.end()).filter_map(|i| self.func().unwrap().instruction(i as u64).ok())
-                                               .collect();
+        let result = (self.start()..self.end())
+            .filter_map(|i| self.func().unwrap().instruction(i).ok())
+            .collect();
         result
     }
 
@@ -100,7 +102,6 @@ pub trait BasicBlockTrait {
             for block in blocks_slice {
                 res.push(BasicBlock::new(*block, self.raw_function().clone()));
             }
-
         }
 
         res

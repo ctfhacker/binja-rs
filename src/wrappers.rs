@@ -1,4 +1,4 @@
-//! Provides basic `new` and `Drop` implementations for Binary Ninja core types for easier 
+//! Provides basic `new` and `Drop` implementations for Binary Ninja core types for easier
 //! multithreading access of these types
 
 use core::*;
@@ -19,15 +19,17 @@ macro_rules! impl_rust_binja_core {
 
         impl $name {
             pub fn new(ptr: *mut $typ) -> Self {
-                trace!("Making   {}: {:#x}", stringify!($typ), ptr as u64);
+                // trace!("Making   {}: {:#x}", stringify!($typ), ptr as u64);
                 Self { ptr }
             }
         }
 
         impl std::ops::Drop for $name {
             fn drop(&mut self) {
-                trace!("Dropping {}: {:#x}", stringify!($typ), self.ptr as u64);
-                unsafe { $freefunc(self.ptr); }
+                // trace!("Dropping {}: {:#x}", stringify!($typ), self.ptr as u64);
+                unsafe {
+                    $freefunc(self.ptr);
+                }
             }
         }
 
@@ -38,7 +40,7 @@ macro_rules! impl_rust_binja_core {
                 &self.ptr
             }
         }
-    }
+    };
 }
 
 impl_rust_binja_core!(wrapper BinjaFunction, kind BNFunction, freefunc BNFreeFunction);

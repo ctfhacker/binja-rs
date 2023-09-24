@@ -1,42 +1,44 @@
 //! Provides the top level `BinaryView` for analyzing binaries
 use core::*;
 
-use anyhow::{Result, Context};
-use rayon::prelude::*;
-use rayon::iter::IntoParallelIterator;
+use anyhow::{Context, Result};
 
-use std::slice;
+use rayon::prelude::*;
+
+use std::borrow::Cow;
+use std::convert::TryInto;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::borrow::Cow;
 use std::fmt;
-use std::path::{PathBuf, Path};
-use std::time::Instant;
-use std::sync::Arc;
 use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::slice;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::Instant;
 
+use crate::databuffer::DataBuffer;
+use crate::filemetadata::FileMetadata;
+use crate::function::Function;
+use crate::highlevelil::HighLevelILInstruction;
+use crate::lowlevelil::LowLevelILInstruction;
+use crate::mediumlevelil::MediumLevelILInstruction;
+use crate::platform::Platform;
+use crate::plugin::Plugins;
+use crate::reference::ReferenceSource;
+use crate::savesettings::SaveSettings;
+use crate::startup::init_plugins;
+use crate::stringreference::StringReference;
+use crate::symbol::Symbol;
 use crate::unsafe_try;
-use filemetadata::FileMetadata;
-use platform::Platform;
-use startup::init_plugins;
-use function::Function;
-use reference::ReferenceSource;
-use databuffer::DataBuffer;
-use stringreference::StringReference;
-use wrappers::BinjaBinaryView;
-use lowlevelil::LowLevelILInstruction;
-use mediumlevelil::MediumLevelILInstruction;
-use highlevelil::HighLevelILInstruction;
-use symbol::Symbol;
-use savesettings::SaveSettings;
-use plugin::Plugins;
+use crate::wrappers::BinjaBinaryView;
 
 /// Top level struct for accessing binary analysis functions
 #[derive(Clone)]
 pub struct BinaryView {
     /// Handle given by BinjaCore
     handle: Arc<BinjaBinaryView>,
-    meta:   FileMetadata,
+    meta: FileMetadata,
 }
 
 unsafe impl Send for BinaryView {}
@@ -44,7 +46,17 @@ unsafe impl Sync for BinaryView {}
 
 #[derive(Debug)]
 pub enum BinjaError {
-    BinaryViewError
+    BinaryViewError,
+}
+
+impl Drop for BinaryView {
+    fn drop(&mut self) {
+        // If this is the last active binary view, shut down binary ninja
+        if crate::ACTIVE_BINARYVIEWS.fetch_sub(1, Ordering::SeqCst) == 1 {
+            trace!("Dropping last active binary view. Shutting down binary ninja");
+            unsafe { BNShutdown() }
+        }
+    }
 }
 
 impl BinaryView {
@@ -64,12 +76,11 @@ impl BinaryView {
     /// let bv = BinaryView::new_from_filename("tests/ls").unwrap();
     /// assert_eq!(bv.has_functions(), true);
     /// ```
-	pub fn new_from_filename(filename: &str) -> Result<BinaryView> {
+    pub fn new_from_filename(filename: &str) -> Result<BinaryView> {
         if !Path::new(filename).exists() {
             panic!("File not found: {}", filename);
         }
 
-        env_logger::init();
         trace!("env_logger initialized!");
 
         init_plugins();
@@ -80,16 +91,16 @@ impl BinaryView {
         let view = BinaryView::open(filename)?;
 
         // Init the logger
-        // Go through all found view types (except Raw) for this file and attempt to create that 
+        // Go through all found view types (except Raw) for this file and attempt to create that
         // type
         for view_type in view.available_view_types() {
-            if view_type.name() == "Raw" { 
-                continue; 
+            if view_type.name() == "Raw" {
+                continue;
             }
 
-            // Create the view type 
+            // Create the view type
             let bv = view_type.create(&view)?;
-            
+
             // If successfully created, update analysis for the view
             let now = Instant::now();
 
@@ -100,15 +111,20 @@ impl BinaryView {
                 bv.create_database()?;
             }
 
-            trace!("Analysis took {}.{} seconds", 
-                    now.elapsed().as_secs(), 
-                    now.elapsed().subsec_nanos());
+            trace!(
+                "Analysis took {}.{} seconds",
+                now.elapsed().as_secs(),
+                now.elapsed().subsec_nanos()
+            );
 
             // Return the view
             return Ok(bv);
         }
 
-        Err(anyhow!("Failed to find a view type for given file: {}", filename))
+        Err(anyhow!(
+            "Failed to find a view type for given file: {}",
+            filename
+        ))
     }
 
     /// Return the `Raw` BinaryViewType for this BinaryView
@@ -117,8 +133,8 @@ impl BinaryView {
         let handle = unsafe_try!(BNGetFileViewOfType(self.meta.handle(), name.as_ptr()))
             .context("BNGetFileViewOfType failed")?;
 
-        Ok(BinaryView { 
-            handle: Arc::new(BinjaBinaryView::new(handle)), 
+        Ok(BinaryView {
+            handle: Arc::new(BinjaBinaryView::new(handle)),
             meta: self.meta.clone(),
         })
     }
@@ -133,29 +149,36 @@ impl BinaryView {
     pub fn functions(&self) -> Vec<Function> {
         let mut count = 0;
 
-        unsafe { 
+        unsafe {
             let functions = BNGetAnalysisFunctionList(self.handle(), &mut count);
             let funcs_slice = slice::from_raw_parts(functions, count as usize);
-            let result = funcs_slice.iter()
-                                    .map(|&f| Function::new(f).unwrap())
-                                    .collect();
+            let result = funcs_slice
+                .iter()
+                .map(|&f| Function::new(f).unwrap())
+                .collect();
             BNFreeFunctionList(functions, count);
             result
         }
     }
 
     /// Alias for clarification of `get_function_at`
-    pub fn get_function_starting_at(&self, addr: u64) -> Result<Function> {
+    pub fn get_function_starting_at(&self, addr: u64) -> Result<Option<Function>> {
         self.get_function_at(addr)
     }
 
     /// Return the function starting at the given `addr`
-    pub fn get_function_at(&self, addr: u64) -> Result<Function> {
-        let plat = self.platform()
+    pub fn get_function_at(&self, addr: u64) -> Result<Option<Function>> {
+        let plat = self
+            .platform()
             .ok_or(anyhow!("Can't get_function_at without platform"))?;
 
-        let handle = unsafe_try!(BNGetAnalysisFunction(self.handle(), plat.handle(), addr))?;
-        Function::new(handle)
+        let handle = unsafe { BNGetAnalysisFunction(self.handle(), plat.handle(), addr) };
+
+        if handle == std::ptr::null_mut() {
+            return Ok(None);
+        }
+
+        Ok(Some(Function::new(handle)?))
     }
 
     /// # Example
@@ -172,13 +195,14 @@ impl BinaryView {
     pub fn strings(&self) -> Vec<StringReference> {
         let mut count = 0;
 
-        unsafe { 
+        unsafe {
             let strings = BNGetStrings(self.handle(), &mut count);
             let strings_slice = slice::from_raw_parts(strings, count as usize);
 
-            let result = strings_slice.iter()
-                                      .map(|&s| StringReference::new(s, self.read(s.start, s.length)))
-                                      .collect();
+            let result = strings_slice
+                .iter()
+                .map(|&s| StringReference::new(s, self.read(s.start, s.length.try_into().unwrap())))
+                .collect();
 
             BNFreeStringReferenceList(strings);
             result
@@ -222,15 +246,18 @@ impl BinaryView {
     /// assert_eq!(bv.type_name(), "ELF");
     /// ```
     pub fn type_name(&self) -> Cow<str> {
-        unsafe { 
+        unsafe {
             let name_ptr = BNGetViewType(self.handle());
-            let name = CStr::from_ptr(name_ptr).to_string_lossy().into_owned().into();
+            let name = CStr::from_ptr(name_ptr)
+                .to_string_lossy()
+                .into_owned()
+                .into();
             BNFreeString(name_ptr);
             name
         }
     }
 
-    /// Open a BinaryDataView for the given 
+    /// Open a BinaryDataView for the given
     fn open(filename: &str) -> Result<BinaryView> {
         init_plugins();
 
@@ -239,45 +266,56 @@ impl BinaryView {
 
         let handle = if filename.ends_with("bndb") {
             // Sanity check the header of the BNDB is correct
-            const needle: &'static str = "SQLite format 3";
-            let mut check = [0u8; needle.len()];
+            const NEEDLE: &'static str = "SQLite format 3";
+            let mut check = [0u8; NEEDLE.len()];
             let mut f = std::fs::File::open(filename)?;
-            f.read_exact(&mut check);
+            f.read_exact(&mut check)?;
 
             // Ensure the header is the needle for the bndb file
-            assert!(check == needle.as_bytes(), 
-                "Binary Ninja database file does not have correct header");
+            assert!(
+                check == NEEDLE.as_bytes(),
+                "Binary Ninja database file does not have correct header"
+            );
 
-            unsafe_try!(BNOpenExistingDatabase(metadata.handle(), 
-                                               ffi_name.as_ptr()))?
+            unsafe_try!(BNOpenExistingDatabase(metadata.handle(), ffi_name.as_ptr()))?
         } else {
-            unsafe_try!(BNCreateBinaryDataViewFromFilename(metadata.handle(), 
-                                                            ffi_name.as_ptr()))?
+            // Add to the current active binary views
+            crate::ACTIVE_BINARYVIEWS.fetch_add(1, Ordering::SeqCst);
+
+            unsafe_try!(BNCreateBinaryDataViewFromFilename(
+                metadata.handle(),
+                ffi_name.as_ptr()
+            ))?
         };
 
-        Ok(BinaryView { 
-            handle: Arc::new(BinjaBinaryView::new(handle)), 
+        Ok(BinaryView {
+            handle: Arc::new(BinjaBinaryView::new(handle)),
             meta: metadata,
         })
     }
 
     fn read(&self, addr: u64, len: u64) -> DataBuffer {
-        unsafe { 
-            DataBuffer::new_from_handle(BNReadViewBuffer(self.handle(), addr, len))
+        unsafe {
+            DataBuffer::new_from_handle(BNReadViewBuffer(
+                self.handle(),
+                addr,
+                len.try_into().unwrap(),
+            ))
         }
     }
 
     fn available_view_types(&self) -> Vec<BinaryViewType> {
         let mut count = 0;
 
-        unsafe { 
+        unsafe {
             let types = BNGetBinaryViewTypesForData(self.handle(), &mut count);
 
-            let types_slice = slice::from_raw_parts(types, count as usize);
+            let types_slice = slice::from_raw_parts(types, count);
 
-            let result = types_slice.iter()
-                                    .map(|&t| BinaryViewType::new(t))
-                                    .collect();
+            let result = types_slice
+                .iter()
+                .map(|&t| BinaryViewType::new(t))
+                .collect();
 
             BNFreeBinaryViewTypeList(types);
             result
@@ -288,11 +326,13 @@ impl BinaryView {
         Platform::new(&self)
     }
 
-    /// Get all LLIL instructions in the binary 
+    /// Get all LLIL instructions in the binary
     pub fn llil_instructions(&self) -> Vec<LowLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<LowLevelILInstruction>> = self.functions().iter()
+        let all_instrs: Vec<Vec<LowLevelILInstruction>> = self
+            .functions()
+            .iter()
             .filter_map(|func| func.llil_instructions().ok())
             .collect();
 
@@ -307,7 +347,9 @@ impl BinaryView {
     pub fn par_llil_instructions(&self) -> Vec<LowLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<LowLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<LowLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.llil_instructions().ok())
             .collect();
 
@@ -322,7 +364,9 @@ impl BinaryView {
     pub fn mlil_instructions(&self) -> Vec<MediumLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<MediumLevelILInstruction>> = self.functions().iter()
+        let all_instrs: Vec<Vec<MediumLevelILInstruction>> = self
+            .functions()
+            .iter()
             .filter_map(|func| func.mlil_instructions().ok())
             .collect();
 
@@ -337,7 +381,9 @@ impl BinaryView {
     pub fn par_mlil_instructions(&self) -> Vec<MediumLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<MediumLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<MediumLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.mlil_instructions().ok())
             .collect();
 
@@ -352,7 +398,9 @@ impl BinaryView {
     pub fn par_hlil_instructions(&self) -> Vec<HighLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.hlil_instructions().ok())
             .collect();
 
@@ -367,7 +415,9 @@ impl BinaryView {
     pub fn hlil_instructions(&self) -> Vec<HighLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .iter()
             .filter_map(|func| func.hlil_instructions().ok())
             .collect();
 
@@ -382,7 +432,9 @@ impl BinaryView {
     pub fn hlilssa_instructions(&self) -> Vec<HighLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.hlilssa_instructions().ok())
             .collect();
 
@@ -397,7 +449,9 @@ impl BinaryView {
     pub fn hlilssa_expressions(&self) -> Vec<HighLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .iter()
             .filter_map(|func| func.hlilssa_expressions().ok())
             .collect();
 
@@ -412,7 +466,9 @@ impl BinaryView {
     pub fn par_hlil_expressions(&self) -> Vec<HighLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.hlil_expressions().ok())
             .collect();
 
@@ -427,7 +483,9 @@ impl BinaryView {
     pub fn par_hlilssa_expressions(&self) -> Vec<HighLevelILInstruction> {
         let mut res = Vec::new();
 
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.hlilssa_expressions().ok())
             .collect();
 
@@ -439,16 +497,19 @@ impl BinaryView {
     }
 
     /// Return all HLIL expressions in the binary, filtered by the given filter function
-    pub fn hlilssa_expressions_filtered(&self, 
-            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
-            -> Vec<HighLevelILInstruction> {
+    pub fn hlilssa_expressions_filtered(
+        &self,
+        filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync),
+    ) -> Vec<HighLevelILInstruction> {
         // Initialize the result
         let mut res = Vec::new();
 
         print!("Getting HLILSSA expressions\n");
 
-        // Gather all the filtered HLILSSA expressions from all functions 
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().iter()
+        // Gather all the filtered HLILSSA expressions from all functions
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .iter()
             .filter_map(|func| func.hlilssa_expressions_filtered(&self, filter).ok())
             .collect();
 
@@ -463,16 +524,19 @@ impl BinaryView {
 
     /// Return all HLIL expressions in the binary, filtered by the given filter function
     /// in parallel
-    pub fn par_hlil_expressions_filtered(&self, 
-            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
-            -> Vec<HighLevelILInstruction> {
+    pub fn par_hlil_expressions_filtered(
+        &self,
+        filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync),
+    ) -> Vec<HighLevelILInstruction> {
         // Initialize the result
         let mut res = Vec::new();
 
         print!("Getting HLIL expressions\n");
 
         // Gather all the filtered HLILSSA expressions from all functions in parallel
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.hlil_expressions_filtered(&self, filter).ok())
             .collect();
 
@@ -487,16 +551,19 @@ impl BinaryView {
 
     /// Return all HLIL expressions in the binary, filtered by the given filter function
     /// in parallel
-    pub fn par_hlilssa_expressions_filtered(&self, 
-            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
-            -> Vec<HighLevelILInstruction> {
+    pub fn par_hlilssa_expressions_filtered(
+        &self,
+        filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync),
+    ) -> Vec<HighLevelILInstruction> {
         // Initialize the result
         let mut res = Vec::new();
 
         print!("Getting HLILSSA expressions\n");
 
         // Gather all the filtered HLILSSA expressions from all functions in parallel
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.hlilssa_expressions_filtered(&self, filter).ok())
             .collect();
 
@@ -510,16 +577,19 @@ impl BinaryView {
     }
 
     /// Return all HLIL instructions in the binary, filtered by the given filter function
-    pub fn par_hlil_instructions_filtered(&self, 
-            filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync))
-            -> Vec<HighLevelILInstruction> {
+    pub fn par_hlil_instructions_filtered(
+        &self,
+        filter: &(dyn Fn(&BinaryView, &HighLevelILInstruction) -> bool + 'static + Sync),
+    ) -> Vec<HighLevelILInstruction> {
         // Initialize the result
         let mut res = Vec::new();
 
         print!("Getting HLILSSA instructions\n");
 
         // Gather all the filtered HLILSSA expressions from all functions in parallel
-        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self.functions().par_iter()
+        let all_instrs: Vec<Vec<HighLevelILInstruction>> = self
+            .functions()
+            .par_iter()
             .filter_map(|func| func.hlil_instructions_filtered(&self, filter).ok())
             .collect();
 
@@ -538,7 +608,7 @@ impl BinaryView {
 
         let mut res = Vec::new();
 
-        unsafe { 
+        unsafe {
             let xrefs = BNGetCodeReferences(self.handle(), addr, &mut count);
             let xrefs_slice = slice::from_raw_parts(xrefs, count as usize);
             for xref in xrefs_slice {
@@ -559,7 +629,7 @@ impl BinaryView {
 
         let mut res = Vec::new();
 
-        unsafe { 
+        unsafe {
             let xrefs = BNGetCallers(self.handle(), addr, &mut count);
             let xrefs_slice = slice::from_raw_parts(xrefs, count as usize);
             for xref in xrefs_slice {
@@ -580,8 +650,8 @@ impl BinaryView {
 
         let mut res = Vec::new();
 
-        unsafe { 
-            // Convert the given `ReferenceSource` to a `BNReferenceSource` for the 
+        unsafe {
+            // Convert the given `ReferenceSource` to a `BNReferenceSource` for the
             // binja core call `BNGetCallees`
             let mut bn_ref = ref_source.as_bnreferencesource();
 
@@ -589,11 +659,13 @@ impl BinaryView {
             let addrs = BNGetCallees(self.handle(), &mut bn_ref, &mut count);
 
             // Get a slice from the raw buffer returned
-            let addrs_slice = slice::from_raw_parts(addrs, count as usize);
+            let addrs_slice = slice::from_raw_parts(addrs, count);
 
             // Get the functions from the starting addresses passed back from binja core
             for addr in addrs_slice {
-                res.push(self.get_function_at(*addr)?);
+                if let Some(func) = self.get_function_at(*addr)? {
+                    res.push(func);
+                }
             }
 
             // Free the list from core
@@ -605,17 +677,21 @@ impl BinaryView {
 
     /// Attempt to get the symbol at the given `addr`
     pub fn get_symbol_at(&self, addr: u64) -> Result<Symbol> {
-        let sym_handle = unsafe_try!(BNGetSymbolByAddress(self.handle(), addr, 
-                0 as *const BNNameSpace))?;
+        let sym_handle = unsafe_try!(BNGetSymbolByAddress(
+            self.handle(),
+            addr,
+            0 as *const BNNameSpace
+        ))?;
 
         Ok(Symbol::new(sym_handle))
     }
 
     /// Abort analysis of the currently running analysis
     pub fn abort_analysis(&self) {
-        unsafe { BNAbortAnalysis(self.handle()); }
+        unsafe {
+            BNAbortAnalysis(self.handle());
+        }
     }
-
 
     /// Create a database for this binary view
     pub fn create_database(&self) -> Result<()> {
@@ -624,15 +700,13 @@ impl BinaryView {
             bndb.set_extension("bndb");
 
             // Get a generic save settings to save with
-            let settings = SaveSettings::new()
-                .context("Failed to create SaveSettings")?;
+            let settings = SaveSettings::new().context("Failed to create SaveSettings")?;
 
             // Create the filename for the database
             let ptr = CString::new(bndb.to_str().unwrap()).unwrap();
 
             // Get the raw BinaryViewType for this BinaryView
-            let raw_type = self.raw_view()
-                .context("Failed to create raw view")?;
+            let raw_type = self.raw_view().context("Failed to create raw view")?;
 
             // Create the database
             let res = BNCreateDatabase(raw_type.handle(), ptr.as_ptr(), settings.handle());
@@ -646,22 +720,20 @@ impl BinaryView {
     }
 
     /// Save the current view into the database
-    pub fn save_auto_snapshot(&self) -> Result<()> {
+    pub fn save_auto_snapshot(&self) -> Result<bool> {
         unsafe {
             let settings = SaveSettings::new()?;
-            let snapshot = BNSaveAutoSnapshot(self.handle(), settings.handle());
+            Ok(BNSaveAutoSnapshot(self.handle(), settings.handle()))
         }
-
-        Ok(())
     }
 
-    /// Execute the `PDB\Load` command 
+    /// Execute the `PDB\Load` command
     pub fn load_pdb(&self) -> Result<()> {
         // Get the current list of loaded plugins
         let plugins = Plugins::get_list();
 
         for plugin in plugins.iter() {
-            // Look only for the `PDB\Load` 
+            // Look only for the `PDB\Load`
             if plugin.name() != "PDB\\Load" {
                 continue;
             }
@@ -670,7 +742,7 @@ impl BinaryView {
             print!("Found PDB Load\n");
 
             // Execute the PBD load command
-            plugin.execute(&self);
+            plugin.execute(&self)?;
 
             return Ok(());
         }
@@ -688,8 +760,13 @@ impl fmt::Display for BinaryView {
 
 impl fmt::Debug for BinaryView {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "<BinaryView: {:?}, start: {:#x}, len: {:#x}>", 
-               self.name(), self.start(), self.len())
+        write!(
+            f,
+            "<BinaryView: {:?}, start: {:#x}, len: {:#x}>",
+            self.name(),
+            self.start(),
+            self.len()
+        )
     }
 }
 
@@ -713,29 +790,33 @@ impl From<*mut BNBinaryView> for BinaryView {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct BinaryViewType {
-    handle: *mut BNBinaryViewType
+    handle: *mut BNBinaryViewType,
 }
 
 impl BinaryViewType {
     pub fn new(bvt: *mut BNBinaryViewType) -> BinaryViewType {
-        BinaryViewType {
-            handle: bvt
-        }
+        BinaryViewType { handle: bvt }
     }
 
     pub fn name(&self) -> Cow<str> {
-        unsafe { 
+        unsafe {
             let name_ptr = BNGetBinaryViewTypeName(self.handle);
-            let name = CStr::from_ptr(name_ptr).to_string_lossy().into_owned().into();
+            let name = CStr::from_ptr(name_ptr)
+                .to_string_lossy()
+                .into_owned()
+                .into();
             BNFreeString(name_ptr);
             name
         }
     }
 
     pub fn long_name(&self) -> Cow<str> {
-        unsafe { 
+        unsafe {
             let name_ptr = BNGetBinaryViewTypeLongName(self.handle);
-            let name = CStr::from_ptr(name_ptr).to_string_lossy().into_owned().into();
+            let name = CStr::from_ptr(name_ptr)
+                .to_string_lossy()
+                .into_owned()
+                .into();
             BNFreeString(name_ptr);
             name
         }
@@ -745,10 +826,12 @@ impl BinaryViewType {
     fn create(&self, data: &BinaryView) -> Result<BinaryView> {
         let handle = unsafe_try!(BNCreateBinaryViewOfType(self.handle, data.handle()))?;
 
-        Ok(BinaryView { 
-            handle: Arc::new(BinjaBinaryView::new(handle)), 
+        // Add to the current active binary views
+        crate::ACTIVE_BINARYVIEWS.fetch_add(1, Ordering::SeqCst);
+
+        Ok(BinaryView {
+            handle: Arc::new(BinjaBinaryView::new(handle)),
             meta: data.meta.clone(),
         })
     }
-
 }

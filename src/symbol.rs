@@ -1,20 +1,22 @@
-//! Provides `Symbol` 
+//! Provides `Symbol`
 use core::*;
 
 use std::sync::Arc;
 
-use crate::wrappers::BinjaSymbol;
 use crate::binjastr::BinjaStr;
+use crate::wrappers::BinjaSymbol;
 
 /// Symbol of an address from binary ninja
 #[derive(Clone)]
 pub struct Symbol {
-    handle: Arc<BinjaSymbol>
+    handle: Arc<BinjaSymbol>,
 }
 
 impl Symbol {
     pub fn new(handle: *mut BNSymbol) -> Self {
-        Symbol { handle: Arc::new(BinjaSymbol::new(handle)) }
+        Symbol {
+            handle: Arc::new(BinjaSymbol::new(handle)),
+        }
     }
 
     fn handle(&self) -> *mut BNSymbol {
@@ -52,7 +54,7 @@ impl Symbol {
     pub fn symbol_type(&self) -> SymbolType {
         let symbol_type = unsafe { BNGetSymbolType(self.handle()) };
         SymbolType::from_bnsymboltype(symbol_type)
-                    .expect(format!("Found unknown SymbolType: {:?}", symbol_type).as_str())
+            .expect(format!("Found unknown SymbolType: {:?}", symbol_type).as_str())
     }
 }
 
@@ -76,11 +78,13 @@ impl std::fmt::Debug for Symbol {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SymbolType {
-	FunctionSymbol,
-	ImportAddressSymbol,
-	ImportedFunctionSymbol,
-	DataSymbol,
-	ImportedDataSymbol
+    FunctionSymbol,
+    ImportAddressSymbol,
+    ImportedFunctionSymbol,
+    DataSymbol,
+    ImportedDataSymbol,
+    ExternalSymbol,
+    LibraryFunctionSymbol,
 }
 
 // Send for rayon
@@ -94,7 +98,9 @@ impl SymbolType {
             2 => Some(SymbolType::ImportedFunctionSymbol),
             3 => Some(SymbolType::DataSymbol),
             4 => Some(SymbolType::ImportedDataSymbol),
-            _ => panic!("Unknown Symbol type: {:?}\n", n)
+            5 => Some(SymbolType::ExternalSymbol),
+            6 => Some(SymbolType::LibraryFunctionSymbol),
+            _ => panic!("Unknown Symbol type: {:?}\n", n),
         }
     }
 }

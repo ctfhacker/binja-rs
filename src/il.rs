@@ -6,16 +6,16 @@ use anyhow::Result;
 
 use std::sync::Arc;
 
-use core::{BNVariable, BNGetVariableType, BNToVariableIdentifier, BNGetVariableName};
+use crate::architecture::CoreArchitecture;
+use crate::binaryview::BinaryView;
+use crate::binjastr::BinjaStr;
+use crate::function::Function;
+use crate::highlevelil::{HighLevelILFunction, HighLevelILInstruction, HighLevelILOperation};
+use crate::mediumlevelil::{MediumLevelILInstruction, MediumLevelILOperation};
+use crate::wrappers::BinjaType;
 use core::{BNGetGotoLabelName, BNGetHighLevelILSSAVarDefinition};
 use core::{BNGetMediumLevelILSSAVarDefinition, BNGetMediumLevelILSSAVarUses};
-use crate::binaryview::BinaryView;
-use crate::function::Function;
-use crate::binjastr::BinjaStr;
-use crate::architecture::CoreArchitecture;
-use crate::wrappers::BinjaType;
-use crate::highlevelil::{HighLevelILFunction, HighLevelILInstruction, HighLevelILOperation};
-use crate::mediumlevelil::{MediumLevelILFunction, MediumLevelILInstruction, MediumLevelILOperation};
+use core::{BNGetVariableName, BNGetVariableType, BNToVariableIdentifier, BNVariable};
 
 #[derive(Clone)]
 pub struct Register {
@@ -33,7 +33,10 @@ impl Register {
         if self.index & 0x8000_0000 > 0 {
             format!("temp{}", self.index & 0x7fff_ffff)
         } else {
-            self.arch.get_reg_name(self.index).to_string_lossy().to_string()
+            self.arch
+                .get_reg_name(self.index)
+                .to_string_lossy()
+                .to_string()
         }
     }
 }
@@ -71,7 +74,12 @@ impl Flag {
         if self.index & 0x8000_0000 > 0 {
             Some(format!("cond:{}", self.index & 0x7fff_ffff))
         } else {
-            Some(self.arch.get_flag_name(self.index)?.to_string_lossy().to_string())
+            Some(
+                self.arch
+                    .get_flag_name(self.index)?
+                    .to_string_lossy()
+                    .to_string(),
+            )
         }
     }
 }
@@ -99,7 +107,7 @@ impl std::fmt::Debug for Flag {
 /// An SSA Register
 pub struct SSARegister {
     reg: Register,
-    version: u32
+    version: u32,
 }
 
 impl SSARegister {
@@ -120,7 +128,7 @@ impl std::fmt::Debug for SSARegister {
 /// An SSA Flag
 pub struct SSAFlag {
     flag: Flag,
-    version: u32
+    version: u32,
 }
 
 impl SSAFlag {
@@ -154,7 +162,10 @@ impl RegisterStack {
         if self.index & 0x8000_0000 > 0 {
             format!("temp{}", self.index & 0x7fff_ffff)
         } else {
-            self.arch.get_reg_name(self.index).to_string_lossy().to_string()
+            self.arch
+                .get_reg_name(self.index)
+                .to_string_lossy()
+                .to_string()
         }
     }
 }
@@ -195,9 +206,8 @@ impl VariableSourceType {
 }
 */
 
-
-
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Variable {
     func: Function,
     pub var: BNVariable,
@@ -263,22 +273,22 @@ impl std::fmt::Debug for Variable {
 pub enum AnalysisLevel {
     Low,
     Medium,
-    High
+    High,
 }
 
 #[derive(Clone)]
 pub struct SSAVariable {
     pub var: Variable,
-    pub version: u32,
+    pub version: usize,
 }
 
 impl SSAVariable {
-    pub fn new(var: Variable, version: u32) -> Self {
+    pub fn new(var: Variable, version: usize) -> Self {
         Self { var, version }
     }
 
     /// Get the HLIL instruction where this SSAVariable is defined. If the SSA variable
-    /// is version 0, attempt to get the xrefs of the found function and return the 
+    /// is version 0, attempt to get the xrefs of the found function and return the
     /// instruction where this variable originates
     pub fn hlil_definition(&self, bv: &BinaryView) -> Result<Vec<HighLevelILInstruction>> {
         // For version 0, but not arg, then there isn't another definition for this var
@@ -304,7 +314,7 @@ impl SSAVariable {
                     xrefs.push(res);
                 }
 
-                // HLIL xrefs can result in a `nop`. For a bit better coverage, 
+                // HLIL xrefs can result in a `nop`. For a bit better coverage,
                 // attempt to look for a `Call` or `CallSsa` that directly calls
                 // the xref function
                 use self::HighLevelILOperation::{Call, CallSsa, ConstPtr};
@@ -314,10 +324,10 @@ impl SSAVariable {
                 for curr_expr_index in 0..expr_count {
                     let hlilssa = xref.func.hlilssa()?;
                     // let curr_expr_index = expr_index + i;
-                    let expr = HighLevelILInstruction::from_expr(
-                        hlilssa, curr_expr_index, None)?.ssa_form()?;
+                    let expr = HighLevelILInstruction::from_expr(hlilssa, curr_expr_index, None)?
+                        .ssa_form()?;
 
-                    if let Call { dest, .. }|CallSsa { dest, ..} = &*expr.operation {
+                    if let Call { dest, .. } | CallSsa { dest, .. } = &*expr.operation {
                         if let ConstPtr { constant } = &*dest.operation {
                             if *constant == self.var.func.start() {
                                 info!("{:#x} -- {:#x}", expr.address, xref.address());
@@ -325,21 +335,21 @@ impl SSAVariable {
                             }
                         }
                     }
-
                 }
             }
 
-            for curr_xref in &xrefs {
-                // print!("Xref found!: {:#x}\n", curr_xref.address);
-            }
-
-            debug!("XREF for {} from {:#x}: {}\n", self, self.var.func.start(), xrefs.len());
+            debug!(
+                "XREF for {} from {:#x}: {}\n",
+                self,
+                self.var.func.start(),
+                xrefs.len()
+            );
 
             // For all HLIL instructions, traverse the graph of operations until we find
             // a CallSsa instruction, which contains the parameters for the Call. Once
             // found, grab the HLIL instruction for the same index as the current variable
             //
-            // Example: 
+            // Example:
             //  Curent: SSAVar arg3#0
             //  Result: All params[2] from all xrefs to the function holding arg3#0
             'xref: for curr_xref in xrefs {
@@ -349,23 +359,42 @@ impl SSAVariable {
                 let mut xref = curr_xref.clone();
                 let mut count = 0;
                 loop {
-                    debug!("[{}][{:#x}->{:#x}] Graph {}", count, self.var.func.start(), xref.address, xref);
-                    debug!("[{}][{:#x}->{:#x}] Graph {:?}", count, self.var.func.start(), xref.address, xref);
+                    debug!(
+                        "[{}][{:#x}->{:#x}] Graph {}",
+                        count,
+                        self.var.func.start(),
+                        xref.address,
+                        xref
+                    );
+                    debug!(
+                        "[{}][{:#x}->{:#x}] Graph {:?}",
+                        count,
+                        self.var.func.start(),
+                        xref.address,
+                        xref
+                    );
                     match *xref.operation {
-                        HighLevelILOperation::Assign { src, .. } => { xref = src; }
-                        HighLevelILOperation::AssignUnpack { src, .. } => { xref = src; }
-                        HighLevelILOperation::VarInitSsa { src, .. } => { xref = src; }
-                        HighLevelILOperation::DerefSsa { src, .. } => { xref = src; }
+                        HighLevelILOperation::Assign { src, .. } => {
+                            xref = src;
+                        }
+                        HighLevelILOperation::AssignUnpack { src, .. } => {
+                            xref = src;
+                        }
+                        HighLevelILOperation::VarInitSsa { src, .. } => {
+                            xref = src;
+                        }
+                        HighLevelILOperation::DerefSsa { src, .. } => {
+                            xref = src;
+                        }
                         // HighLevelILOperation::Nop { .. } => { Nop doesn't go anywhere, this xref isn't useful break; }
-                        HighLevelILOperation::CallSsa { ref params, .. } |
-                        HighLevelILOperation::Call { ref params, .. } => {
-                            // Found the Call operation, attempt to get the variable 
+                        HighLevelILOperation::CallSsa { ref params, .. }
+                        | HighLevelILOperation::Call { ref params, .. } => {
+                            // Found the Call operation, attempt to get the variable
 
                             // Get the parameter number from the arg name
                             // Convert arg3 -> 3
-                            let param_index: usize = self.var.name()
-                                .replace("arg", "")
-                                .parse().unwrap_or(!0);
+                            let param_index: usize =
+                                self.var.name().replace("arg", "").parse().unwrap_or(!0);
 
                             debug!("Checking param: {}", self.var.name());
 
@@ -377,9 +406,8 @@ impl SSAVariable {
                                 // Attempt to get the parameter from the found params
                                 // If found, add the found instruction to the result
                                 if let Some(instr) = params.get(index) {
-                                    if matches!(&*instr.operation, 
-                                            HighLevelILOperation::Var {..}) {
-
+                                    if matches!(&*instr.operation, HighLevelILOperation::Var { .. })
+                                    {
                                     }
                                     debug!("Checking instr: {}", instr);
                                     debug!("Checking instr: {:?}", instr);
@@ -388,31 +416,39 @@ impl SSAVariable {
                             }
                             break;
                         }
-                        HighLevelILOperation::ConstPtr { constant } => {
+                        HighLevelILOperation::ConstPtr { constant: _ } => {
                             //let symbol = bv.get_symbol_at(constant);
                             //if let Ok(sym) = &symbol {
-                                //print!("Symbol found: {}\n", sym);
+                            //print!("Symbol found: {}\n", sym);
                             //}
                             break;
                         }
-                        HighLevelILOperation::Add { ref left, ref right } => {
+                        HighLevelILOperation::Add {
+                            ref left,
+                            ref right,
+                        } => {
                             res.push(left.clone());
                             res.push(right.clone());
                         }
-                        HighLevelILOperation::AssignMemSsa { .. } |
-                        HighLevelILOperation::Tailcall { .. } |
-                        HighLevelILOperation::Sub { .. } |
-                        HighLevelILOperation::UnsignedLessThan { .. } |
-                        HighLevelILOperation::VarSsa { .. } |
-                        HighLevelILOperation::Const { .. } 
-                        => {
+                        HighLevelILOperation::AssignMemSsa { .. }
+                        | HighLevelILOperation::Tailcall { .. }
+                        | HighLevelILOperation::Sub { .. }
+                        | HighLevelILOperation::UnsignedLessThan { .. }
+                        | HighLevelILOperation::VarSsa { .. }
+                        | HighLevelILOperation::Const { .. } => {
                             debug!("Pushing xref: {:?}\n", &xref);
                             res.push(xref);
                             break;
                         }
                         _ => {
-                            eprint!("Unknown xref: {:?} FROM\n{:#x} -> {:#x}: {:?}\n", xref.operation_name(), 
-                                   self.var.func.start(), curr_xref.address, curr_xref.operation_name());
+                            eprint!(
+                                "Unknown xref: {:?} FROM\n{:#x} -> {:#x}: {:?}\n",
+                                xref.operation_name(),
+                                self.var.func.start(),
+                                curr_xref.address,
+                                curr_xref.operation_name()
+                            );
+
                             continue 'xref;
 
                             // return Err(anyhow!("Unknown operation: {:#x} {:?}\n", xref.address, xref.operation));
@@ -421,10 +457,6 @@ impl SSAVariable {
 
                     count += 1;
                 }
-            }
-
-            for instr in &res {
-                // print!("Xrefs: {}", instr);
             }
 
             return Ok(res);
@@ -441,16 +473,17 @@ impl SSAVariable {
         };
 
         // Get the expression index for the definition of this ssa variable
-        let expr_index = unsafe {
-            BNGetHighLevelILSSAVarDefinition(hlilssa.handle(), &var, self.version as u64)
-        };
+        let expr_index =
+            unsafe { BNGetHighLevelILSSAVarDefinition(hlilssa.handle(), &var, self.version) };
 
         // Return the new HLIL instruction
-        Ok(vec![HighLevelILInstruction::from_expr(hlilssa, expr_index, None)?])
+        Ok(vec![HighLevelILInstruction::from_expr(
+            hlilssa, expr_index, None,
+        )?])
     }
 
     /// Get the MLIL instruction where this SSAVariable is defined. If the SSA variable
-    /// is version 0, attempt to get the xrefs of the found function and return the 
+    /// is version 0, attempt to get the xrefs of the found function and return the
     /// instruction where this variable originates
     pub fn mlil_definition(&self, bv: &BinaryView) -> Result<Vec<MediumLevelILInstruction>> {
         // For version 0, but not arg, then there isn't another definition for this var
@@ -475,38 +508,50 @@ impl SSAVariable {
                 xrefs.push(xref.mlilssa()?);
             }
 
-            for curr_xref in xrefs.iter() {
-                // print!("Xref found!: {:#x}\n", curr_xref.address);
-            }
-
-            debug!("XREF for {} from {:#x}: {}\n", self, self.var.func.start(), xrefs.len());
+            debug!(
+                "XREF for {} from {:#x}: {}\n",
+                self,
+                self.var.func.start(),
+                xrefs.len()
+            );
 
             // For all HLIL instructions, traverse the graph of operations until we find
             // a CallSsa instruction, which contains the parameters for the Call. Once
             // found, grab the HLIL instruction for the same index as the current variable
             //
-            // Example: 
+            // Example:
             //  Curent: SSAVar arg3#0
             //  Result: All params[2] from all xrefs to the function holding arg3#0
-            'xref: for curr_xref in xrefs {
+            for curr_xref in xrefs {
                 debug!("Checking xref: {}\n", curr_xref);
 
                 // Resulting variable that is rewritten on each loop iteration
-                let mut xref = curr_xref.clone();
-                let mut count = 0;
+                let xref = curr_xref.clone();
+                let count = 0;
                 loop {
-                    debug!("[{}][{:#x}->{:#x}] Graph {}", count, self.var.func.start(), xref.address, xref);
-                    debug!("[{}][{:#x}->{:#x}] Graph {:?}", count, self.var.func.start(), xref.address, xref);
+                    debug!(
+                        "[{}][{:#x}->{:#x}] Graph {}",
+                        count,
+                        self.var.func.start(),
+                        xref.address,
+                        xref
+                    );
+                    debug!(
+                        "[{}][{:#x}->{:#x}] Graph {:?}",
+                        count,
+                        self.var.func.start(),
+                        xref.address,
+                        xref
+                    );
                     match *xref.operation {
-                        MediumLevelILOperation::CallSsa { ref params, .. } |
-                        MediumLevelILOperation::Call { ref params, .. } => {
-                            // Found the Call operation, attempt to get the variable 
+                        MediumLevelILOperation::CallSsa { ref params, .. }
+                        | MediumLevelILOperation::Call { ref params, .. } => {
+                            // Found the Call operation, attempt to get the variable
 
                             // Get the parameter number from the arg name
                             // Convert arg3 -> 3
-                            let param_index: usize = self.var.name()
-                                .replace("arg", "")
-                                .parse().unwrap_or(!0);
+                            let param_index: usize =
+                                self.var.name().replace("arg", "").parse().unwrap_or(!0);
 
                             debug!("Checking param: {}", self.var.name());
 
@@ -518,10 +563,10 @@ impl SSAVariable {
                                 // Attempt to get the parameter from the found params
                                 // If found, add the found instruction to the result
                                 if let Some(instr) = params.get(index) {
-                                    if matches!(&*instr.operation, 
-                                            MediumLevelILOperation::Var {..}) {
-
-                                    }
+                                    if matches!(
+                                        &*instr.operation,
+                                        MediumLevelILOperation::Var { .. }
+                                    ) {}
                                     debug!("Checking instr: {}", instr);
                                     debug!("Checking instr: {:?}", instr);
                                     res.push(instr.clone());
@@ -529,10 +574,10 @@ impl SSAVariable {
                             }
                             break;
                         }
-                        MediumLevelILOperation::ConstPtr { constant } => {
+                        MediumLevelILOperation::ConstPtr { constant: _ } => {
                             //let symbol = bv.get_symbol_at(constant);
                             //if let Ok(sym) = &symbol {
-                                //print!("Symbol found: {}\n", sym);
+                            //print!("Symbol found: {}\n", sym);
                             //}
                             break;
                         }
@@ -541,7 +586,7 @@ impl SSAVariable {
                         MediumLevelILOperation::Sub { .. } |
                         MediumLevelILOperation::UnsignedLessThan { .. } |
                         MediumLevelILOperation::VarSsa { .. } |
-                        MediumLevelILOperation::Const { .. } 
+                        MediumLevelILOperation::Const { .. }
                         => {
                             debug!("Pushing xref: {:?}\n", &xref);
                             res.push(xref);
@@ -549,18 +594,21 @@ impl SSAVariable {
                         }
                         */
                         _ => {
-                            eprint!("Unknown xref: {:?} FROM\n{:#x} -> {:#x}: {:?}\n", xref.operation_name(), 
-                                   self.var.func.start(), curr_xref.address, curr_xref.operation_name());
-                            return Err(anyhow!("Unknown operation: {:#x} {:?}\n", xref.address, xref.operation));
+                            eprint!(
+                                "Unknown xref: {:?} FROM\n{:#x} -> {:#x}: {:?}\n",
+                                xref.operation_name(),
+                                self.var.func.start(),
+                                curr_xref.address,
+                                curr_xref.operation_name()
+                            );
+                            return Err(anyhow!(
+                                "Unknown operation: {:#x} {:?}\n",
+                                xref.address,
+                                xref.operation
+                            ));
                         }
                     }
-
-                    count += 1;
                 }
-            }
-
-            for instr in &res {
-                // print!("MLIL Xrefs: {}", instr);
             }
 
             return Ok(res);
@@ -577,17 +625,17 @@ impl SSAVariable {
         };
 
         // Get the expression index for the definition of this ssa variable
-        let func_index = unsafe {
-            BNGetMediumLevelILSSAVarDefinition(mlilssa.handle(), &var, self.version as u64)
-        };
+        let func_index =
+            unsafe { BNGetMediumLevelILSSAVarDefinition(mlilssa.handle(), &var, self.version) };
 
         // Return the new HLIL instruction
-        Ok(vec![MediumLevelILInstruction::from_func_index(mlilssa, func_index)])
+        Ok(vec![MediumLevelILInstruction::from_func_index(
+            mlilssa, func_index,
+        )])
     }
 
-    /// Get the MLIL instruction(s) where this SSAVariable is used. 
+    /// Get the MLIL instruction(s) where this SSAVariable is used.
     pub fn mlil_uses(&self) -> Result<Vec<MediumLevelILInstruction>> {
-
         // Construct the BNVariable
         let var = core::BNVariable {
             type_: self.var.var.type_,
@@ -603,13 +651,11 @@ impl SSAVariable {
         // Get the expression index for the definition of this ssa variable
         unsafe {
             let mut count = 0;
-            let version = self.version as u64;
-            let uses = BNGetMediumLevelILSSAVarUses(mlilssa.handle(), &var, version, 
-                &mut count);
+            let version = self.version;
+            let uses = BNGetMediumLevelILSSAVarUses(mlilssa.handle(), &var, version, &mut count);
             let indexes_slice = std::slice::from_raw_parts(uses, count as usize);
             for index in indexes_slice {
-                let instr = MediumLevelILInstruction::from_func_index(mlilssa.clone(), 
-                                                                      *index);
+                let instr = MediumLevelILInstruction::from_func_index(mlilssa.clone(), *index);
                 res.push(instr);
             }
         };
@@ -617,7 +663,6 @@ impl SSAVariable {
         // Return the new MLIL instructions
         Ok(res)
     }
-
 }
 
 impl std::fmt::Display for SSAVariable {
@@ -637,11 +682,10 @@ impl std::fmt::Debug for SSAVariable {
     }
 }
 
-
 #[derive(Clone)]
 pub struct SSAVariableDestSrc {
     pub dest: SSAVariable,
-    pub src: SSAVariable
+    pub src: SSAVariable,
 }
 
 impl SSAVariableDestSrc {
@@ -670,7 +714,7 @@ impl std::fmt::Debug for SSAVariableDestSrc {
 #[derive(Clone)]
 pub struct Intrinsic {
     arch: CoreArchitecture,
-    index: u32
+    index: u32,
 }
 
 impl Intrinsic {
@@ -703,7 +747,7 @@ impl std::fmt::Debug for Intrinsic {
 #[derive(Clone)]
 pub struct GotoLabel {
     func: HighLevelILFunction,
-    id: u64
+    id: u64,
 }
 
 impl GotoLabel {
@@ -730,5 +774,31 @@ impl std::fmt::Debug for GotoLabel {
             .field("name", &self.name())
             .finish()
             */
+    }
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct ConstantData {
+    func: Function,
+    type_: u64,
+    value: u64,
+    size: usize,
+}
+
+impl ConstantData {
+    pub fn new(func: Function, type_: u64, value: u64, size: usize) -> Self {
+        Self {
+            func,
+            type_,
+            value,
+            size,
+        }
+    }
+}
+
+impl std::fmt::Debug for ConstantData {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "<const data: TODO>")
     }
 }

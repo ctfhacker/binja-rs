@@ -1,26 +1,20 @@
-#[macro_use]
-extern crate clap;
-extern crate binja_rs;
-
 use binja_rs::*;
-use clap::{App, Arg};
+
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    input: String,
+}
 
 fn main() {
-    let matches = App::new("Binja bininfo")
-                    .version("0.1")
-                    .author("@ctfhacker")
-                    .about("Prints binary information using Binary Ninja")
-                    .arg(Arg::with_name("INPUT")
-                        .help("Binary file to analyze")
-                        .required(true)
-                        .index(1))
-                    .get_matches();
+    let args = Args::parse();
 
-    let filename = matches.value_of("INPUT").unwrap();
-    let bv = binaryview::BinaryView::new_from_filename(filename).expect("BinaryView failed");
+    let bv = binaryview::BinaryView::new_from_filename(&args.input).expect("BinaryView failed");
 
     println!("Binary View: {}", bv);
-    println!("Target: {}", filename);
+    println!("Target: {}", args.input);
     println!("TYPE: {}", bv.type_name());
     println!("START: {:#x}", bv.start());
     println!("ENTRY: {:#x}", bv.entry_point());
@@ -31,7 +25,11 @@ fn main() {
     for func in bv.functions().iter().take(10) {
         println!("{:#x}: {}", func.start(), func.name().unwrap());
 
-        let refs: Vec<u64> = bv.get_code_refs(func.start()).iter().map(|x| x.addr).collect();
+        let refs: Vec<u64> = bv
+            .get_code_refs(func.start())
+            .iter()
+            .map(|x| x.addr)
+            .collect();
         println!("xrefs: {:x?}", refs);
     }
 

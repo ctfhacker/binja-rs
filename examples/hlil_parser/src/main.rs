@@ -1,29 +1,17 @@
-#[macro_use]
-extern crate clap;
-extern crate binja_rs;
-extern crate anyhow;
-extern crate rayon;
-
 use anyhow::Result;
-use rayon::prelude::*;
-use clap::{App, Arg};
+use clap::Parser;
 
 use binja_rs::binaryview::BinaryView;
-use binja_rs::traits::*;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    input: String,
+}
 
 fn main() -> Result<()> {
-    let matches = App::new("Binja hlil_parse")
-                    .version("0.1")
-                    .author("@ctfhacker")
-                    .about("Example using some of the HLIL functionality")
-                    .arg(Arg::with_name("INPUT")
-                        .help("Binary file to analyze")
-                        .required(true)
-                        .index(1))
-                    .get_matches();
-
-    let filename = matches.value_of("INPUT").unwrap();
-    let bv = BinaryView::new_from_filename(filename).unwrap();
+    let args = Args::parse();
+    let bv = BinaryView::new_from_filename(&args.input).unwrap();
 
     print!("HLIL instructions\n");
 
@@ -40,7 +28,6 @@ fn main() -> Result<()> {
         print!("{}\n", instr);
     }
     print!("Took {:?}\n", now.elapsed());
-
 
     Ok(())
 }

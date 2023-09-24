@@ -3,16 +3,16 @@ use core::*;
 
 use std::sync::Arc;
 
-use binjastr::BinjaStr;
-use wrappers::BinjaSymbol;
-                                                                                   
+use crate::binjastr::BinjaStr;
+use crate::wrappers::BinjaSymbol;
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SymbolType {
-	FunctionSymbol,
-	ImportAddressSymbol,
-	ImportedFunctionSymbol,
-	DataSymbol,
-	ImportedDataSymbol
+    FunctionSymbol,
+    ImportAddressSymbol,
+    ImportedFunctionSymbol,
+    DataSymbol,
+    ImportedDataSymbol,
 }
 
 // Send for rayon
@@ -26,19 +26,21 @@ impl SymbolType {
             2 => Some(SymbolType::ImportedFunctionSymbol),
             3 => Some(SymbolType::DataSymbol),
             4 => Some(SymbolType::ImportedDataSymbol),
-            _ => panic!("Unknown Symbol type: {:?}\n", n)
+            _ => panic!("Unknown Symbol type: {:?}\n", n),
         }
     }
 }
 
 #[derive(Clone)]
 pub struct Symbol {
-    handle: Arc<BinjaSymbol>
+    handle: Arc<BinjaSymbol>,
 }
 
 impl Symbol {
     pub fn new_from_symbol(ptr: *mut BNSymbol) -> Symbol {
-        Symbol { handle: Arc::new(BinjaSymbol::new(ptr)) }
+        Symbol {
+            handle: Arc::new(BinjaSymbol::new(ptr)),
+        }
     }
 
     fn handle(&self) -> *mut BNSymbol {
@@ -46,21 +48,15 @@ impl Symbol {
     }
 
     pub fn name(&self) -> BinjaStr {
-        unsafe {
-            BinjaStr::new(BNGetSymbolRawName(self.handle()))
-        }
+        unsafe { BinjaStr::new(BNGetSymbolRawName(self.handle())) }
     }
 
     pub fn short_name(&self) -> BinjaStr {
-        unsafe {
-            BinjaStr::new(BNGetSymbolShortName(self.handle()))
-        }
+        unsafe { BinjaStr::new(BNGetSymbolShortName(self.handle())) }
     }
 
     pub fn long_name(&self) -> BinjaStr {
-        unsafe {
-            BinjaStr::new(BNGetSymbolFullName(self.handle()))
-        }
+        unsafe { BinjaStr::new(BNGetSymbolFullName(self.handle())) }
     }
 
     pub fn address(&self) -> u64 {
@@ -70,11 +66,9 @@ impl Symbol {
     pub fn symbol_type(&self) -> SymbolType {
         let symbol_type = unsafe { BNGetSymbolType(self.handle()) };
         SymbolType::from_bnsymboltype(symbol_type)
-                    .expect(format!("Found unknown SymbolType: {:?}", symbol_type).as_str())
+            .expect(format!("Found unknown SymbolType: {:?}", symbol_type).as_str())
     }
 }
-
-
 
 impl std::fmt::Debug for Symbol {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -92,8 +86,7 @@ pub enum VariableSourceType {
     StackVariableSourceType,
     RegisterVariableSourceType,
     FlagVariableSourceType,
-    Unknown
-
+    Unknown,
 }
 
 impl VariableSourceType {
