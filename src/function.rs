@@ -196,12 +196,36 @@ impl Function {
 
     /// Returns all of the LLIL instructions for this function
     pub fn llil_instructions(&self) -> Result<Vec<LowLevelILInstruction>> {
+        timeloop::scoped_timer!(crate::Timer::Function__LLILInstructions);
+
         let mut res = Vec::new();
 
         for bb in self.llil()?.blocks() {
             for instr in bb.il() {
                 res.push(instr);
             }
+        }
+
+        Ok(res)
+    }
+
+    /// Returns all of the LLIL expressions for this function
+    pub fn llil_expressions(&self) -> Result<Vec<LowLevelILInstruction>> {
+        timeloop::scoped_timer!(crate::Timer::Function__LLILExpressions);
+
+        let mut res = Vec::new();
+
+        let func = self.llil()?;
+
+        // Get the number of expressions in this function
+        let expr_len = unsafe { BNGetLowLevelILExprCount(func.handle()) };
+
+        for expr_index in 0..expr_len {
+            res.push(LowLevelILInstruction::from_expr(
+                func.clone(),
+                expr_index,
+                None,
+            ));
         }
 
         Ok(res)

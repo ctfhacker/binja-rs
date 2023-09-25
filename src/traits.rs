@@ -20,6 +20,7 @@ pub trait FunctionTrait {
     fn ssa(&self) -> Result<Self::Func> {
         self.ssa_form()
     }
+    fn non_ssa_form(&self) -> Result<Self::Func>;
 
     fn text(&self, i: usize) -> Result<String>;
     fn expr_text(&self, expr_index: usize) -> Result<String>;

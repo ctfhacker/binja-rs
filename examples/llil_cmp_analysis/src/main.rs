@@ -14,42 +14,66 @@ struct Args {
     base_addr: Option<String>,
 }
 
+timeloop::impl_enum!(
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    pub enum Timer {
+        BinaryNinja,
+        ParseExpressions,
+    }
+);
+
+timeloop::create_profiler!(Timer);
+
 fn main() -> Result<()> {
     let args = Args::parse();
-    let mut bv = binaryview::BinaryView::new_from_filename(&args.input)
-        .base_addr(
-            args.base_addr
-                .map(|x| u64::from_str_radix(&x.replace("0x", ""), 16).unwrap()),
-        )
-        .build()
-        .unwrap();
 
-    let now = std::time::Instant::now();
-    for instr in bv.llil_expressions().iter() {
-        match &*instr.operation {
-            LowLevelILOperation::Equals { left, right }
-            | LowLevelILOperation::NotEquals { left, right }
-            | LowLevelILOperation::NotEquals { left, right } => {
-                let operation = match &*instr.operation {
-                    LowLevelILOperation::Equals { left, right } => "CMP_E",
-                    LowLevelILOperation::NotEquals { left, right } => "CMP_NE",
-                    _ => panic!("Invalid operation: {:?}", instr.operation),
-                };
+    timeloop::start_profiler!();
 
-                let mut left_str = String::new();
-                let mut right_str = String::new();
-                get_cmp_operand(&mut bv, left, &mut left_str);
-                get_cmp_operand(&mut bv, right, &mut right_str);
+    let mut bv = timeloop::time_work!(Timer::BinaryNinja, {
+        binaryview::BinaryView::new_from_filename(&args.input)
+            .base_addr(
+                args.base_addr
+                    .map(|x| u64::from_str_radix(&x.replace("0x", ""), 16).unwrap()),
+            )
+            .build()
+            .unwrap()
+    });
 
-                println!(
-                    "{:#x},{:#x},{left_str},{operation},{right_str}",
-                    instr.address, instr.size,
-                );
+    let mut lines = Vec::new();
+    timeloop::time_work!(Timer::ParseExpressions, {
+        let now = std::time::Instant::now();
+        for instr in bv.llil_expressions().iter() {
+            match &*instr.operation {
+                LowLevelILOperation::Equals { left, right }
+                | LowLevelILOperation::NotEquals { left, right }
+                | LowLevelILOperation::NotEquals { left, right } => {
+                    let operation = match &*instr.operation {
+                        LowLevelILOperation::Equals { left, right } => "CMP_E",
+                        LowLevelILOperation::NotEquals { left, right } => "CMP_NE",
+                        _ => panic!("Invalid operation: {:?}", instr.operation),
+                    };
+
+                    let mut left_str = String::new();
+                    let mut right_str = String::new();
+                    get_cmp_operand(&mut bv, left, &mut left_str)?;
+                    get_cmp_operand(&mut bv, right, &mut right_str)?;
+
+                    let res = format!(
+                        "{:#x},{:#x},{left_str},{operation},{right_str}",
+                        instr.address, instr.size,
+                    );
+
+                    lines.push(res);
+                }
+                _ => {}
             }
-            _ => {}
         }
+    });
+
+    for line in lines {
+        println!("{line}");
     }
-    print!("Took {:?}\n", now.elapsed());
+    timeloop::print!();
 
     Ok(())
 }
@@ -92,7 +116,7 @@ pub fn get_cmp_operand(
         }
         LowLevelILOperation::Load { src } => {
             output.push_str("load ");
-            get_cmp_operand(bv, src, output);
+            get_cmp_operand(bv, src, output)?;
         }
         LowLevelILOperation::ConstPtr { constant } => {
             output.push_str(&format!("{constant:#x}"));
@@ -116,18 +140,18 @@ pub fn get_cmp_operand(
                 LowLevelILOperation::Xor { .. } => "xor",
                 LowLevelILOperation::Lsr { .. } => "logical_shift_right",
                 LowLevelILOperation::Lsl { .. } => "logical_shift_left",
-                LowLevelILOperation::MuluDp { .. } => "muludp",
+                LowLevelILOperation::MuluDp { .. } => "mul",
                 _ => panic!("Invalid arithmetic operation"),
             };
 
             output.push_str(&format!("{name} "));
-            get_cmp_operand(bv, left, output);
+            get_cmp_operand(bv, left, output)?;
             output.push(' ');
-            get_cmp_operand(bv, right, output);
+            get_cmp_operand(bv, right, output)?;
         }
         LowLevelILOperation::Neg { src } => {
             output.push_str("neg ");
-            get_cmp_operand(bv, src, output);
+            get_cmp_operand(bv, src, output)?;
         }
         _ => panic!("Unknown: {instr:?}"),
     }

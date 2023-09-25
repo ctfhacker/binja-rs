@@ -46,6 +46,7 @@ fn main() -> Result<()> {
     }
     print!("Took {:?}\n", now.elapsed());
 
+    /*
     print!("LLIL instructions gathered in parallel\n");
 
     let now = std::time::Instant::now();
@@ -53,6 +54,7 @@ fn main() -> Result<()> {
         print!("{}\n", instr);
     }
     print!("Took {:?}\n", now.elapsed());
+    */
 
     Ok(())
 }

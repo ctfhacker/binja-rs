@@ -2,7 +2,6 @@
 //! multithreading access of these types
 
 use binja_sys::*;
-use log::trace;
 
 /// Used for boiler plate creation of `new` and `Drop` functions for basic Binary Ninja core types
 ///

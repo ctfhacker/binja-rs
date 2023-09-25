@@ -88,6 +88,14 @@ impl MediumLevelILFunction {
         })
     }
 
+    pub fn non_ssa_form(&self) -> Result<Self> {
+        let handle = unsafe_try!(BNGetMediumLevelILNonSSAForm(self.handle()))?;
+        Ok(MediumLevelILFunction {
+            handle: Arc::new(BinjaMediumLevelILFunction::new(handle)),
+            func: self.func.clone(),
+        })
+    }
+
     /*
     pub fn get_medium_level_il_expr_index(&self, i: usize) -> usize {
         unsafe {
@@ -149,6 +157,10 @@ impl FunctionTrait for MediumLevelILFunction {
 
     fn ssa_form(&self) -> Result<MediumLevelILFunction> {
         self.ssa_form()
+    }
+
+    fn non_ssa_form(&self) -> Result<MediumLevelILFunction> {
+        self.non_ssa_form()
     }
 
     /// Construct the text for a given MediumLevelILInstruction index
@@ -930,7 +942,7 @@ impl MediumLevelILOperation {
 
         macro_rules! int {
             () => {{
-                let res = (instr.operands[operand_index] & 0x7fff_ffff)
+                let res = (instr.operands[operand_index] & ((1 << 63) - 1))
                     .wrapping_sub(instr.operands[operand_index] & (1 << 63));
                 operand_index += 1;
                 res

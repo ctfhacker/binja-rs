@@ -84,6 +84,14 @@ impl HighLevelILFunction {
         })
     }
 
+    pub fn non_ssa_form(&self) -> Result<Self> {
+        let handle = unsafe_try!(BNGetHighLevelILNonSSAForm(self.handle()))?;
+        Ok(HighLevelILFunction { 
+            handle: Arc::new(BinjaHighLevelILFunction::new(handle)), 
+            func: self.func.clone() 
+        })
+    }
+
     pub fn get_ssa_var_definition(&self, ssavar: SSAVariable) 
             -> Result<HighLevelILInstruction> {
         let expr_index = unsafe {
@@ -149,6 +157,10 @@ impl FunctionTrait for HighLevelILFunction {
 
     fn ssa_form(&self) -> Result<HighLevelILFunction> {
         self.ssa_form()
+    }
+
+    fn non_ssa_form(&self) -> Result<HighLevelILFunction> {
+        self.non_ssa_form()
     }
 
     /// Construct the text for a given HighLevelILInstruction index
@@ -574,12 +586,6 @@ impl HighLevelILOperation {
 
         macro_rules! int {
             () => {{
-                /*
-                print!("{:#x} {:#x}\n", 
-                    instr.operands[operand_index] & ((1 << 63) - 1),
-                    instr.operands[operand_index] & (1 << 63));
-                */
-
                 let value = instr.operands[operand_index] ;
                 let res = (value & ((1 << 63) - 1)).wrapping_sub(value & (1 << 63));
                 operand_index += 1;

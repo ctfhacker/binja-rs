@@ -11,7 +11,9 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let bv = binaryview::BinaryView::new_from_filename(&args.input).expect("BinaryView failed");
+    let bv = binaryview::BinaryView::new_from_filename(&args.input)
+        .build()
+        .unwrap();
 
     println!("Binary View: {}", bv);
     println!("Target: {}", args.input);

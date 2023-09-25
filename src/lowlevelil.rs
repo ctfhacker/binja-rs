@@ -34,6 +34,8 @@ unsafe impl Sync for LowLevelILFunction {}
 
 impl LowLevelILFunction {
     pub fn new(func: Arc<BinjaFunction>) -> Result<LowLevelILFunction> {
+        // timeloop::scoped_timer!(crate::Timer::LowLevelILFunction__new);
+
         let handle = unsafe_try!(BNGetFunctionLowLevelIL(**func))?;
         Ok(LowLevelILFunction {
             handle: Arc::new(BinjaLowLevelILFunction::new(handle)),
@@ -41,40 +43,74 @@ impl LowLevelILFunction {
         })
     }
 
-    fn handle(&self) -> *mut BNLowLevelILFunction {
+    pub fn handle(&self) -> *mut BNLowLevelILFunction {
         **self.handle
     }
 
     /// Get the owner function for this LLIL function
     pub fn function(&self) -> Function {
+        // timeloop::scoped_timer!(crate::Timer::LowLevelILFunction__function);
+
         Function::from_arc(self.func.clone())
     }
 
     /// Get the address of this function
     pub fn address(&self) -> u64 {
+        timeloop::scoped_timer!(crate::Timer::BNLowLevelILGetCurrentAdddress);
+
         unsafe { BNLowLevelILGetCurrentAddress(self.handle()) }
     }
 
     /// Get the number of instructions in this function
     pub fn len(&self) -> usize {
+        timeloop::scoped_timer!(crate::Timer::BNLowLevelILInstructionCount);
+
         unsafe { BNGetLowLevelILInstructionCount(self.handle()) }
     }
 
     /// Get the architecture for this function
     pub fn arch(&self) -> Result<CoreArchitecture> {
+        // timeloop::scoped_timer!(crate::Timer::LowLevelILFunction__Arch);
+
         CoreArchitecture::new_from_func(**self.func)
     }
 
     fn get_index_for_instruction(&self, i: usize) -> usize {
+        timeloop::scoped_timer!(crate::Timer::BNGetLowLevelILIndexForInstruction);
+
         unsafe { BNGetLowLevelILIndexForInstruction(self.handle(), i) }
     }
 
     pub fn ssa_form(&self) -> Result<Self> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILFunction__SsaForm);
+
         let handle = unsafe_try!(BNGetLowLevelILSSAForm(self.handle()))?;
         Ok(LowLevelILFunction {
             handle: Arc::new(BinjaLowLevelILFunction::new(handle)),
             func: self.func.clone(),
         })
+    }
+
+    pub fn non_ssa_form(&self) -> Result<Self> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILFunction__NonSsaForm);
+
+        let handle = unsafe_try!(BNGetLowLevelILNonSSAForm(self.handle()))?;
+        Ok(LowLevelILFunction {
+            handle: Arc::new(BinjaLowLevelILFunction::new(handle)),
+            func: self.func.clone(),
+        })
+    }
+
+    pub fn get_ssa_reg_definition(&self, ssavar: &SSARegister) -> LowLevelILInstruction {
+        let index = unsafe {
+            BNGetLowLevelILSSARegisterDefinition(
+                self.handle(),
+                ssavar.reg.index,
+                ssavar.version.try_into().unwrap(),
+            )
+        };
+
+        LowLevelILInstruction::from_func_index(self.clone(), index)
     }
 
     /*
@@ -113,11 +149,15 @@ impl FunctionTrait for LowLevelILFunction {
 
     /// Retrieve a LowLevelILInstruction for a given index
     fn instruction(&self, i: usize) -> Result<Self::Ins> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelIL__Instruction);
+
         let res = LowLevelILInstruction::from_func_index(self.clone(), i);
         Ok(res)
     }
 
     fn blocks(&self) -> Vec<Self::Block> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelIL__Blocks);
+
         let mut count = 0;
 
         unsafe {
@@ -140,8 +180,14 @@ impl FunctionTrait for LowLevelILFunction {
         self.ssa_form()
     }
 
+    fn non_ssa_form(&self) -> Result<LowLevelILFunction> {
+        self.non_ssa_form()
+    }
+
     /// Construct the text for a given LowLevelILInstruction index
     fn text(&self, i: usize) -> Result<String> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILFunction__Text);
+
         let mut count = 0;
 
         unsafe {
@@ -160,7 +206,7 @@ impl FunctionTrait for LowLevelILFunction {
 
             if list.is_null() {
                 println!(
-                    "[Possible bug] Cannot retrieve LowLevelILInstruction Tokens: {} index {}",
+                    "[Possible bug] Cannot retrieve LowLevelILInstruction Tokens: {} index {:#x}",
                     self, i
                 );
                 return Err(anyhow!("Failed to retrieve LLILInstruction tokens"));
@@ -198,6 +244,8 @@ impl LowLevelILBasicBlock {
         handle: *mut BNBasicBlock,
         func: LowLevelILFunction,
     ) -> Result<LowLevelILBasicBlock> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILBasicBlock__new);
+
         let handle = unsafe_try!(BNNewBasicBlockReference(handle))?;
         Ok(LowLevelILBasicBlock {
             handle: Arc::new(BinjaBasicBlock::new(handle)),
@@ -211,14 +259,20 @@ impl BasicBlockTrait for LowLevelILBasicBlock {
     type Func = LowLevelILFunction;
 
     fn handle(&self) -> *mut BNBasicBlock {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILBasicBlock__handle);
+
         **self.handle
     }
 
     fn func(&self) -> Option<&Self::Func> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILBasicBlock__func);
+
         Some(&self.func)
     }
 
     fn raw_function(&self) -> Function {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILBasicBlock__raw_function);
+
         self.func.function()
     }
 }
@@ -239,6 +293,8 @@ pub struct LowLevelILInstruction {
 impl LowLevelILInstruction {
     /// Get the LLIL instruction from the given `func` at the given `instr_index`
     pub fn from_func_index(func: LowLevelILFunction, instr_index: usize) -> LowLevelILInstruction {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILInstruction__from_func_index);
+
         // Get the raw index for the given instruction index
         let expr_index = func.get_index_for_instruction(instr_index);
 
@@ -251,11 +307,17 @@ impl LowLevelILInstruction {
         expr_index: usize,
         instr_index: Option<usize>,
     ) -> LowLevelILInstruction {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILInstruction__from_expr);
+
         // Get the IL for the given index
         let instr = unsafe { BNGetLowLevelILByIndex(func.handle(), expr_index) };
 
         // If we have the instruction index, grab the text for that instruction
         let text = if let Some(index) = instr_index {
+            if index as i64 == -1 {
+                println!("BAD INDEX: {}", std::backtrace::Backtrace::force_capture());
+            }
+
             func.text(index)
         } else {
             Err(anyhow!("text() for None from_expr unimpl")) // unimplemented!()
@@ -277,11 +339,15 @@ impl LowLevelILInstruction {
 
     /// Convert LLIL instruction into LLIL SSA (Alias for ssa_form)
     pub fn ssa(&self) -> Result<LowLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILInstruction__ssa);
+
         self.ssa_form()
     }
 
     /// Convert LLIL instruction into LLIL SSA
     pub fn ssa_form(&self) -> Result<LowLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILInstruction__ssa_form);
+
         let func_ssa = self.function.ssa_form()?;
         unsafe {
             let expr_index = BNGetLowLevelILSSAExprIndex(self.function.handle(), self.expr_index);
@@ -293,8 +359,29 @@ impl LowLevelILInstruction {
         }
     }
 
+    /// Convert LLIL SSA instruction into LLIL
+    pub fn non_ssa_form(&self) -> Result<LowLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILInstruction__non_ssa_form);
+
+        let non_func_ssa = self.function.non_ssa_form()?;
+        unsafe {
+            let expr_index =
+                BNGetLowLevelILNonSSAExprIndex(self.function.handle(), self.expr_index);
+            let instr_index = self
+                .instr_index
+                .map(|x| BNGetLowLevelILNonSSAInstructionIndex(self.function.handle(), x));
+            Ok(LowLevelILInstruction::from_expr(
+                non_func_ssa,
+                expr_index,
+                instr_index,
+            ))
+        }
+    }
+
     /// Get the MLIL instruction for this LLIL instruction
     pub fn medium_level_il(&self) -> Result<MediumLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILInstruction__medium_level_il);
+
         let mlil_expr_index =
             unsafe { BNGetMediumLevelILExprIndex(self.function.handle(), self.expr_index) };
 
@@ -310,12 +397,16 @@ impl LowLevelILInstruction {
     /// Get the MLIL instruction for this LLIL instruction.
     /// Alias for `self.medium_level_il()`
     pub fn mlil(&self) -> Result<MediumLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelIL__mlil);
+
         self.medium_level_il()
     }
 
     /// Get the MLIL instruction for this LLIL instruction.
     /// Alias for `self.medium_level_il()`
     pub fn mlilssa(&self) -> Result<MediumLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelIL__mlilssa);
+
         self.medium_level_il()?.ssa_form()
     }
 }
@@ -879,6 +970,8 @@ impl LowLevelILOperation {
         func: &LowLevelILFunction,
         expr_index: usize,
     ) -> LowLevelILOperation {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILOperation__from_instr);
+
         let arch = func.arch().expect("Failed to get arch for LLIL").clone();
         let mut operand_index = 0;
 
@@ -918,7 +1011,7 @@ impl LowLevelILOperation {
 
         macro_rules! int {
             () => {{
-                let res = (instr.operands[operand_index] & 0x7fff_ffff)
+                let res = (instr.operands[operand_index] & ((1 << 63) - 1))
                     .wrapping_sub(instr.operands[operand_index] & (1 << 63));
                 operand_index += 1;
                 res

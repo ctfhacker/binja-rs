@@ -60,10 +60,15 @@ impl Drop for BinaryView {
     }
 }
 
-impl BinaryView {
-    /// Utility for getting the handle for this `BinaryView`
-    pub fn handle(&self) -> *mut BNBinaryView {
-        **self.handle
+pub struct BinaryViewBuilder<'a> {
+    filename: &'a str,
+    base_addr: Option<u64>,
+}
+
+impl BinaryViewBuilder<'_> {
+    pub fn base_addr(mut self, base_addr: Option<u64>) -> Self {
+        self.base_addr = base_addr;
+        self
     }
 
     /// Returns a BinaryView given a filename.
@@ -74,10 +79,15 @@ impl BinaryView {
     ///
     /// ```
     /// use binja_rs::BinaryView;
-    /// let bv = BinaryView::new_from_filename("tests/ls").unwrap();
+    /// let bv = BinaryView::new_from_filename("tests/ls").build().unwrap();
     /// assert_eq!(bv.has_functions(), true);
     /// ```
-    pub fn new_from_filename(filename: &str) -> Result<BinaryView> {
+    pub fn build(self) -> Result<BinaryView> {
+        let BinaryViewBuilder {
+            filename,
+            base_addr,
+        } = self;
+
         // If this is the first binary view, start the profiler
         if crate::ACTIVE_BINARYVIEWS.load(Ordering::SeqCst) == 0 {
             timeloop::start_profiler!();
@@ -107,12 +117,22 @@ impl BinaryView {
             }
 
             // Create the view type
-            let bv = view_type.create(&view)?;
+            let mut bv = view_type.create(&view)?;
 
             // If successfully created, update analysis for the view
             let now = Instant::now();
 
             bv.update_analysis_and_wait();
+
+            // Rebase the view if given a new base address
+            if let Some(base_addr) = base_addr {
+                unsafe {
+                    BNRebase(bv.handle(), base_addr);
+                }
+
+                // Create the rebased binary view
+                bv = bv.get_view_of_type(&view_type.name().to_string())?;
+            }
 
             if !is_db {
                 // Write the database if the file isn't already a db
@@ -134,12 +154,34 @@ impl BinaryView {
             filename
         ))
     }
+}
+
+impl BinaryView {
+    /// Utility for getting the handle for this `BinaryView`
+    pub fn handle(&self) -> *mut BNBinaryView {
+        **self.handle
+    }
+
+    pub fn new_from_filename(filename: &str) -> BinaryViewBuilder {
+        BinaryViewBuilder {
+            filename,
+            base_addr: None,
+        }
+    }
 
     /// Return the `Raw` BinaryViewType for this BinaryView
     pub fn raw_view(&self) -> Result<BinaryView> {
-        let name = CString::new("Raw").unwrap();
+        self.get_view_of_type("Raw")
+    }
+
+    /// Return the `Raw` BinaryViewType for this BinaryView
+    pub fn get_view_of_type(&self, name: &str) -> Result<BinaryView> {
+        let name = CString::new(name).unwrap();
         let handle = unsafe_try!(BNGetFileViewOfType(self.meta.handle(), name.as_ptr()))
             .context("BNGetFileViewOfType failed")?;
+
+        // Add to the current active binary views
+        crate::ACTIVE_BINARYVIEWS.fetch_add(1, Ordering::SeqCst);
 
         Ok(BinaryView {
             handle: Arc::new(BinjaBinaryView::new(handle)),
@@ -386,6 +428,25 @@ impl BinaryView {
             .functions()
             .par_iter()
             .filter_map(|func| func.llil_instructions().ok())
+            .collect();
+
+        for instrs in all_instrs {
+            res.extend(instrs);
+        }
+
+        res
+    }
+
+    /// Get all LLIL expressions in the binary
+    pub fn llil_expressions(&self) -> Vec<LowLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__LLILExpressions);
+
+        let mut res = Vec::new();
+
+        let all_instrs: Vec<Vec<LowLevelILInstruction>> = self
+            .functions()
+            .iter()
+            .filter_map(|func| func.llil_expressions().ok())
             .collect();
 
         for instrs in all_instrs {
@@ -823,7 +884,7 @@ impl From<*mut BNBinaryView> for BinaryView {
 }
 */
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BinaryViewType {
     handle: *mut BNBinaryViewType,
 }

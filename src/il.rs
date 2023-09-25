@@ -21,7 +21,7 @@ use binja_sys::{BNGetVariableName, BNGetVariableType, BNToVariableIdentifier, BN
 #[derive(Clone)]
 pub struct Register {
     arch: CoreArchitecture,
-    index: u32,
+    pub index: u32,
 }
 
 impl Register {
@@ -107,8 +107,8 @@ impl std::fmt::Debug for Flag {
 
 /// An SSA Register
 pub struct SSARegister {
-    reg: Register,
-    version: u32,
+    pub reg: Register,
+    pub version: u32,
 }
 
 impl SSARegister {
