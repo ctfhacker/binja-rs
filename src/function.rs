@@ -21,6 +21,7 @@ use crate::architecture::CoreArchitecture;
 use crate::basicblock::BasicBlock;
 use crate::binaryview::BinaryView;
 use crate::binjastr::BinjaStr;
+use crate::calling_convention::CallingConvention;
 use crate::highlevelil::{HighLevelILFunction, HighLevelILInstruction};
 use crate::lowlevelil::{LowLevelILFunction, LowLevelILInstruction};
 use crate::mediumlevelil::{MediumLevelILFunction, MediumLevelILInstruction};
@@ -39,6 +40,7 @@ pub struct Function {
     symbol: Option<Symbol>,
     start: u64,
     symbol_type: Option<SymbolType>,
+    calling_convention: Option<CallingConvention>,
 }
 
 unsafe impl Send for Function {}
@@ -66,6 +68,7 @@ impl Function {
             symbol: curr_symbol,
             start,
             symbol_type,
+            calling_convention: None,
         })
     }
 
@@ -88,6 +91,7 @@ impl Function {
             symbol: curr_symbol,
             start,
             symbol_type,
+            calling_convention: None,
         }
     }
 
@@ -500,6 +504,15 @@ impl Function {
     /// to the BinaryView itself.
     pub fn callers(&self, bv: &BinaryView) -> Vec<ReferenceSource> {
         bv.get_callers(self.start)
+    }
+
+    /// Return the [`CallingConvention`] for this function
+    pub fn calling_convention(&'_ mut self) -> Result<&'_ CallingConvention> {
+        if self.calling_convention.is_none() {
+            self.calling_convention = Some(CallingConvention::new_from_function(self)?);
+        }
+
+        Ok(self.calling_convention.as_ref().unwrap())
     }
 }
 

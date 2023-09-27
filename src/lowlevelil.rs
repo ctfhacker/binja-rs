@@ -539,7 +539,7 @@ pub enum LowLevelILOperation {
     },
     // RegStackFreeRel { stack: reg_stack, dest: LowLevelILInstruction, },
     Const {
-        constant: u64,
+        constant: i64,
     },
     ConstPtr {
         constant: u64,
@@ -709,11 +709,11 @@ pub enum LowLevelILOperation {
     },
     // FlagCond { condition: cond, semantic_class: sem_class, },
     // FlagGroup { semantic_group: sem_group, },
-    Equals {
+    Equal {
         left: LowLevelILInstruction,
         right: LowLevelILInstruction,
     },
-    NotEquals {
+    NotEqual {
         left: LowLevelILInstruction,
         right: LowLevelILInstruction,
     },
@@ -725,23 +725,23 @@ pub enum LowLevelILOperation {
         left: LowLevelILInstruction,
         right: LowLevelILInstruction,
     },
-    SignedLessThanEquals {
+    SignedLessThanEqual {
         left: LowLevelILInstruction,
         right: LowLevelILInstruction,
     },
-    UnsignedLessThanEquals {
+    UnsignedLessThanEqual {
         left: LowLevelILInstruction,
         right: LowLevelILInstruction,
     },
-    SignedGreaterThanEquals {
+    SignedGreaterThanEqual {
         left: LowLevelILInstruction,
         right: LowLevelILInstruction,
     },
-    UnsignedGreaterThanEquals {
+    UnsignedGreaterThanEqual {
         left: LowLevelILInstruction,
         right: LowLevelILInstruction,
     },
-    SsignedGreaterThan {
+    SignedGreaterThan {
         left: LowLevelILInstruction,
         right: LowLevelILInstruction,
     },
@@ -1341,7 +1341,7 @@ impl LowLevelILOperation {
                 */
             }
             BNLowLevelILOperation_LLIL_CONST => {
-                let constant = int!();
+                let constant = int!() as i64;
                 LowLevelILOperation::Const { constant }
             }
             BNLowLevelILOperation_LLIL_CONST_PTR => {
@@ -1583,12 +1583,12 @@ impl LowLevelILOperation {
             BNLowLevelILOperation_LLIL_CMP_E => {
                 let left = expr!();
                 let right = expr!();
-                LowLevelILOperation::Equals { left, right }
+                LowLevelILOperation::Equal { left, right }
             }
             BNLowLevelILOperation_LLIL_CMP_NE => {
                 let left = expr!();
                 let right = expr!();
-                LowLevelILOperation::NotEquals { left, right }
+                LowLevelILOperation::NotEqual { left, right }
             }
             BNLowLevelILOperation_LLIL_CMP_SLT => {
                 let left = expr!();
@@ -1603,27 +1603,27 @@ impl LowLevelILOperation {
             BNLowLevelILOperation_LLIL_CMP_SLE => {
                 let left = expr!();
                 let right = expr!();
-                LowLevelILOperation::SignedLessThanEquals { left, right }
+                LowLevelILOperation::SignedLessThanEqual { left, right }
             }
             BNLowLevelILOperation_LLIL_CMP_ULE => {
                 let left = expr!();
                 let right = expr!();
-                LowLevelILOperation::UnsignedLessThanEquals { left, right }
+                LowLevelILOperation::UnsignedLessThanEqual { left, right }
             }
             BNLowLevelILOperation_LLIL_CMP_SGE => {
                 let left = expr!();
                 let right = expr!();
-                LowLevelILOperation::SignedGreaterThanEquals { left, right }
+                LowLevelILOperation::SignedGreaterThanEqual { left, right }
             }
             BNLowLevelILOperation_LLIL_CMP_UGE => {
                 let left = expr!();
                 let right = expr!();
-                LowLevelILOperation::UnsignedGreaterThanEquals { left, right }
+                LowLevelILOperation::UnsignedGreaterThanEqual { left, right }
             }
             BNLowLevelILOperation_LLIL_CMP_SGT => {
                 let left = expr!();
                 let right = expr!();
-                LowLevelILOperation::SsignedGreaterThan { left, right }
+                LowLevelILOperation::SignedGreaterThan { left, right }
             }
             BNLowLevelILOperation_LLIL_CMP_UGT => {
                 let left = expr!();

@@ -8,6 +8,7 @@ pub mod basicblock;
 pub mod binaryview;
 pub mod binjalog;
 pub mod binjastr;
+pub mod calling_convention;
 pub mod databuffer;
 pub mod filemetadata;
 pub mod function;

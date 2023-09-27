@@ -61,3 +61,30 @@ impl_rust_binja_core!(wrapper BinjaHighLevelILFunction, kind BNHighLevelILFuncti
 impl_rust_binja_core!(wrapper BinjaSymbol, kind BNSymbol, freefunc BNFreeSymbol);
 impl_rust_binja_core!(wrapper BinjaFileMetadata, kind BNFileMetadata, freefunc BNFreeFileMetadata);
 impl_rust_binja_core!(wrapper BinjaSaveSettings, kind BNSaveSettings, freefunc BNFreeSaveSettings);
+
+#[derive(Debug)]
+pub struct BinjaCallingConvention {
+    convention: BNCallingConventionWithConfidence,
+}
+
+impl BinjaCallingConvention {
+    pub fn new(convention: BNCallingConventionWithConfidence) -> Self {
+        Self { convention }
+    }
+}
+
+impl std::ops::Drop for BinjaCallingConvention {
+    fn drop(&mut self) {
+        unsafe {
+            BNFreeCallingConvention(self.convention.convention);
+        }
+    }
+}
+
+impl std::ops::Deref for BinjaCallingConvention {
+    type Target = BNCallingConventionWithConfidence;
+
+    fn deref(&self) -> &Self::Target {
+        &self.convention
+    }
+}

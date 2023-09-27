@@ -3,6 +3,7 @@ use clap::Parser;
 
 use binja_rs::binaryview::BinaryView;
 use binja_rs::lowlevelil::{LowLevelILInstruction, LowLevelILOperation};
+use binja_rs::mediumlevelil::{MediumLevelILInstruction, MediumLevelILOperation};
 use binja_rs::*;
 
 #[derive(Parser)]
@@ -19,8 +20,55 @@ timeloop::impl_enum!(
     pub enum Timer {
         BinaryNinja,
         ParseExpressions,
+        WriteRules,
     }
 );
+
+const STRCMPS: &[&'static str] = &[
+    "strcmp",
+    "strncasecmp",
+    "strcmp",
+    "xmlStrcmp",
+    "xmlStrEqual",
+    "g_strcmp0",
+    "curl_strequal",
+    "strcsequal",
+];
+
+const MEMCMPS: &[&'static str] = &[
+    "memcmp",
+    "bcmp",
+    "CRYPTO_memcmp",
+    "OPENSSL_memcmp",
+    "memcmp_const_time",
+    "memcmpct",
+];
+
+const STRNCMPS: &[&'static str] = &["strncmp", "xmlStrncmp", "curl_strnequal"];
+
+const STRCASECMPS: &[&'static str] = &[
+    "strcasecmp",
+    "stricmp",
+    "ap_cstr_casecmp",
+    "OPENSSL_strcasecmp",
+    "xmlStrcasecmp",
+    "g_strcasecmp",
+    "g_ascii_strcasecmp",
+    "Curl_strcasecompare",
+    "Curl_safe_strcasecompare",
+    "cmsstrcasecmp",
+];
+
+const STRNCASECMPS: &[&'static str] = &[
+    "strncasecmp",
+    "strnicmp",
+    "ap_cstr_casecmpn",
+    "OPENSSL_strncasecmp",
+    "xmlStrncasecmp",
+    "g_ascii_strncasecmp",
+    "Curl_strncasecompare",
+    "g_strncasecmp",
+];
 
 timeloop::create_profiler!(Timer);
 
@@ -44,12 +92,42 @@ fn main() -> Result<()> {
         let now = std::time::Instant::now();
         for instr in bv.llil_expressions().iter() {
             match &*instr.operation {
-                LowLevelILOperation::Equals { left, right }
-                | LowLevelILOperation::NotEquals { left, right }
-                | LowLevelILOperation::NotEquals { left, right } => {
+                LowLevelILOperation::Equal { left, right }
+                | LowLevelILOperation::NotEqual { left, right }
+                | LowLevelILOperation::UnsignedLessThan { left, right }
+                | LowLevelILOperation::UnsignedLessThanEqual { left, right }
+                | LowLevelILOperation::UnsignedGreaterThan { left, right }
+                | LowLevelILOperation::UnsignedGreaterThanEqual { left, right }
+                | LowLevelILOperation::SignedLessThan { left, right }
+                | LowLevelILOperation::SignedLessThanEqual { left, right }
+                | LowLevelILOperation::SignedGreaterThan { left, right }
+                | LowLevelILOperation::SignedGreaterThanEqual { left, right }
+                | LowLevelILOperation::FcmpE { left, right }
+                | LowLevelILOperation::FcmpNe { left, right }
+                | LowLevelILOperation::FcmpLt { left, right }
+                | LowLevelILOperation::FcmpLe { left, right }
+                | LowLevelILOperation::FcmpGe { left, right }
+                | LowLevelILOperation::FcmpGt { left, right } => {
+                    let mut size = instr.size;
+                    let address = instr.address;
+
                     let operation = match &*instr.operation {
-                        LowLevelILOperation::Equals { left, right } => "CMP_E",
-                        LowLevelILOperation::NotEquals { left, right } => "CMP_NE",
+                        LowLevelILOperation::Equal { .. } => "CMP_E",
+                        LowLevelILOperation::NotEqual { .. } => "CMP_NE",
+                        LowLevelILOperation::UnsignedLessThan { .. } => "CMP_ULT",
+                        LowLevelILOperation::UnsignedLessThanEqual { .. } => "CMP_ULE",
+                        LowLevelILOperation::UnsignedGreaterThan { .. } => "CMP_UGT",
+                        LowLevelILOperation::UnsignedGreaterThanEqual { .. } => "CMP_UGE",
+                        LowLevelILOperation::SignedLessThan { .. } => "CMP_SLT",
+                        LowLevelILOperation::SignedLessThanEqual { .. } => "CMP_SLE",
+                        LowLevelILOperation::SignedGreaterThan { .. } => "CMP_SGT",
+                        LowLevelILOperation::SignedGreaterThanEqual { .. } => "CMP_SGE",
+                        LowLevelILOperation::FcmpE { .. } => "FCMP_E",
+                        LowLevelILOperation::FcmpNe { .. } => "FCMP_NE",
+                        LowLevelILOperation::FcmpLt { .. } => "FCMP_LT",
+                        LowLevelILOperation::FcmpLe { .. } => "FCMP_LE",
+                        LowLevelILOperation::FcmpGt { .. } => "FCMP_GT",
+                        LowLevelILOperation::FcmpGe { .. } => "FCMP_GE",
                         _ => panic!("Invalid operation: {:?}", instr.operation),
                     };
 
@@ -58,21 +136,60 @@ fn main() -> Result<()> {
                     get_cmp_operand(&mut bv, left, &mut left_str)?;
                     get_cmp_operand(&mut bv, right, &mut right_str)?;
 
-                    let res = format!(
-                        "{:#x},{:#x},{left_str},{operation},{right_str}",
-                        instr.address, instr.size,
-                    );
+                    let res = format!("{address:#x},{size:#x},{left_str},{operation},{right_str}",);
 
                     lines.push(res);
                 }
+                LowLevelILOperation::Call {
+                    dest: LowLevelILInstruction { operation, .. },
+                } => match **operation {
+                    LowLevelILOperation::ConstPtr { constant } => {
+                        let name = bv.get_symbol_at(constant)?.name();
+
+                        // Get the registers for this function's calling convention
+                        let mut function = instr.function.function();
+                        let calling_convention = function.calling_convention()?;
+                        let arg1 = &calling_convention.int_arg_regs[0];
+                        let arg2 = &calling_convention.int_arg_regs[1];
+                        let arg3 = &calling_convention.int_arg_regs[2];
+
+                        let res = if STRCMPS.contains(&name.as_str())
+                            || STRCASECMPS.contains(&name.as_str())
+                            || STRNCMPS.contains(&name.as_str())
+                            || STRNCASECMPS.contains(&name.as_str())
+                        {
+                            // A two argument function call
+                            format!(
+                                "{:#x},{:#x},reg {arg1},strcmp,reg {arg2}",
+                                instr.address, instr.size
+                            )
+                        } else if MEMCMPS.contains(&name.as_str()) {
+                            // A three argument function call with a dynamic size
+                            format!(
+                                "{:#x},reg {arg3},reg {arg1},memcmp,reg {arg2}",
+                                instr.address
+                            )
+                        } else {
+                            eprintln!("Ignoring function call {name:?}");
+                            continue;
+                        };
+
+                        // Add this function call to the results
+                        lines.push(res);
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
     });
 
-    for line in lines {
-        println!("{line}");
-    }
+    timeloop::time_work!(Timer::BinaryNinja, {
+        let out_file = format!("{}.cmps", args.input);
+        std::fs::write(&out_file, lines.join("\n"));
+        println!("Output rules written to {out_file}");
+    });
+
     timeloop::print!();
 
     Ok(())
@@ -115,14 +232,15 @@ pub fn get_cmp_operand(
             }
         }
         LowLevelILOperation::Load { src } => {
-            output.push_str("load ");
+            output.push_str("load_from ");
             get_cmp_operand(bv, src, output)?;
         }
         LowLevelILOperation::ConstPtr { constant } => {
             output.push_str(&format!("{constant:#x}"));
         }
         LowLevelILOperation::Const { constant } => {
-            output.push_str(&format!("{constant:#x}"));
+            let sign = if constant.is_negative() { "-" } else { "" };
+            output.push_str(&format!("{sign}{:#x}", constant.abs()));
         }
         LowLevelILOperation::Add { left, right }
         | LowLevelILOperation::Sub { left, right }

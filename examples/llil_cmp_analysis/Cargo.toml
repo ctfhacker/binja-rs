@@ -8,9 +8,13 @@ edition = "2021"
 anyhow = "1.0.75"
 clap = { version = "4.4.4", features = ["derive"] }
 rayon = "1.8.0"
-timeloop  = { git = "https://github.com/ctfhacker/timeloop" }
+
+[dependencies.timeloop]
+git = "https://github.com/ctfhacker/timeloop"
+default-features = false
+features = ["disable"]
 
 [dependencies.binja-rs]
 path = "../../../binja-rs"
-features = ["introspection"]
-# features = []
+# features = ["introspection"]
+features = []

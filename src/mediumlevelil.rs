@@ -25,6 +25,7 @@ use crate::function::Function;
 use crate::highlevelil::HighLevelILInstruction;
 use crate::il::{ConstantData, Intrinsic, SSAVariable, SSAVariableDestSrc, Variable};
 use crate::instruction::InstructionTextToken;
+use crate::lowlevelil::LowLevelILInstruction;
 use crate::traits::{BasicBlockTrait, FunctionTrait};
 use crate::unsafe_try;
 use crate::wrappers::{BinjaBasicBlock, BinjaFunction, BinjaMediumLevelILFunction};
@@ -321,6 +322,20 @@ impl MediumLevelILInstruction {
             func_ssa,
             expr_index,
             self.instr_index,
+        ))
+    }
+
+    /// Get the LLIL instruction for this MLIL instruction
+    pub fn low_level_il(&self) -> Result<LowLevelILInstruction> {
+        let llil_expr_index =
+            unsafe { BNGetLowLevelILExprIndex(self.function.handle(), self.expr_index) };
+
+        let llil = self.function.function().llil()?;
+
+        Ok(LowLevelILInstruction::from_expr(
+            llil,
+            llil_expr_index,
+            None,
         ))
     }
 

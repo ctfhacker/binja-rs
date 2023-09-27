@@ -12,6 +12,7 @@ use crate::binjastr::BinjaStr;
 use crate::il::Register;
 use crate::unsafe_try;
 
+#[derive(Debug)]
 pub struct BinjaCoreArchitecture {
     ptr: *mut BNArchitecture,
 }
