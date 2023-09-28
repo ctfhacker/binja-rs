@@ -107,9 +107,12 @@ timeloop::impl_enum!(
         LowLevelILInstruction__ssa_form,
         LowLevelILInstruction__non_ssa_form,
         LowLevelILInstruction__medium_level_il,
+        LowLevelILInstruction__definition,
         LowLevelIL__mlil,
         LowLevelIL__mlilssa,
         LowLevelILOperation__from_instr,
+
+        CallingConvention__new_from_function,
     }
 );
 
@@ -136,7 +139,7 @@ macro_rules! unsafe_try {
 
             if res.is_null() {
                 // If the result is 0, return the anyhow error
-                Err(crate::anyhow!("{} failed", stringify!($e)))
+                Err(crate::anyhow!("{} failed", stringify!($func)))
             } else {
                 // Otherwise return the result
                 Ok(res)

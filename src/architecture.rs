@@ -12,7 +12,7 @@ use crate::binjastr::BinjaStr;
 use crate::il::Register;
 use crate::unsafe_try;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct BinjaCoreArchitecture {
     ptr: *mut BNArchitecture,
 }
@@ -31,7 +31,7 @@ impl std::ops::Deref for BinjaCoreArchitecture {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Hash, Eq)]
 pub struct CoreArchitecture {
     handle: Arc<BinjaCoreArchitecture>,
 }

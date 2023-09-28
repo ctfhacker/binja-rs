@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 
+use std::collections::HashSet;
+
 use binja_rs::binaryview::BinaryView;
 use binja_rs::lowlevelil::{LowLevelILInstruction, LowLevelILOperation};
 use binja_rs::mediumlevelil::{MediumLevelILInstruction, MediumLevelILOperation};
@@ -24,6 +26,7 @@ timeloop::impl_enum!(
     }
 );
 
+/// strcmp-like symbols to treat as if it's a strcmp
 const STRCMPS: &[&'static str] = &[
     "strcmp",
     "strncasecmp",
@@ -35,6 +38,7 @@ const STRCMPS: &[&'static str] = &[
     "strcsequal",
 ];
 
+/// memcmp-like symbols to treat as if it's a memcmp
 const MEMCMPS: &[&'static str] = &[
     "memcmp",
     "bcmp",
@@ -44,8 +48,10 @@ const MEMCMPS: &[&'static str] = &[
     "memcmpct",
 ];
 
+/// strncmp-like symbols to treat as if it's a strncmp
 const STRNCMPS: &[&'static str] = &["strncmp", "xmlStrncmp", "curl_strnequal"];
 
+/// strcasecmp-like symbols to treat as if it's a strcasecmp
 const STRCASECMPS: &[&'static str] = &[
     "strcasecmp",
     "stricmp",
@@ -59,6 +65,7 @@ const STRCASECMPS: &[&'static str] = &[
     "cmsstrcasecmp",
 ];
 
+/// strncasecmp-like symbols to treat as if it's a strncasecmp
 const STRNCASECMPS: &[&'static str] = &[
     "strncasecmp",
     "strnicmp",
@@ -87,56 +94,70 @@ fn main() -> Result<()> {
             .unwrap()
     });
 
+    use LowLevelILOperation::*;
     let mut lines = Vec::new();
     timeloop::time_work!(Timer::ParseExpressions, {
         let now = std::time::Instant::now();
         for instr in bv.llil_expressions().iter() {
             match &*instr.operation {
-                LowLevelILOperation::Equal { left, right }
-                | LowLevelILOperation::NotEqual { left, right }
-                | LowLevelILOperation::UnsignedLessThan { left, right }
-                | LowLevelILOperation::UnsignedLessThanEqual { left, right }
-                | LowLevelILOperation::UnsignedGreaterThan { left, right }
-                | LowLevelILOperation::UnsignedGreaterThanEqual { left, right }
-                | LowLevelILOperation::SignedLessThan { left, right }
-                | LowLevelILOperation::SignedLessThanEqual { left, right }
-                | LowLevelILOperation::SignedGreaterThan { left, right }
-                | LowLevelILOperation::SignedGreaterThanEqual { left, right }
-                | LowLevelILOperation::FcmpE { left, right }
-                | LowLevelILOperation::FcmpNe { left, right }
-                | LowLevelILOperation::FcmpLt { left, right }
-                | LowLevelILOperation::FcmpLe { left, right }
-                | LowLevelILOperation::FcmpGe { left, right }
-                | LowLevelILOperation::FcmpGt { left, right } => {
+                Equal { left, right }
+                | NotEqual { left, right }
+                | UnsignedLessThan { left, right }
+                | UnsignedLessThanEqual { left, right }
+                | UnsignedGreaterThan { left, right }
+                | UnsignedGreaterThanEqual { left, right }
+                | SignedLessThan { left, right }
+                | SignedLessThanEqual { left, right }
+                | SignedGreaterThan { left, right }
+                | SignedGreaterThanEqual { left, right }
+                | FcmpE { left, right }
+                | FcmpNe { left, right }
+                | FcmpLt { left, right }
+                | FcmpLe { left, right }
+                | FcmpGe { left, right }
+                | FcmpGt { left, right } => {
                     let mut size = instr.size;
                     let address = instr.address;
 
                     let operation = match &*instr.operation {
-                        LowLevelILOperation::Equal { .. } => "CMP_E",
-                        LowLevelILOperation::NotEqual { .. } => "CMP_NE",
-                        LowLevelILOperation::UnsignedLessThan { .. } => "CMP_ULT",
-                        LowLevelILOperation::UnsignedLessThanEqual { .. } => "CMP_ULE",
-                        LowLevelILOperation::UnsignedGreaterThan { .. } => "CMP_UGT",
-                        LowLevelILOperation::UnsignedGreaterThanEqual { .. } => "CMP_UGE",
-                        LowLevelILOperation::SignedLessThan { .. } => "CMP_SLT",
-                        LowLevelILOperation::SignedLessThanEqual { .. } => "CMP_SLE",
-                        LowLevelILOperation::SignedGreaterThan { .. } => "CMP_SGT",
-                        LowLevelILOperation::SignedGreaterThanEqual { .. } => "CMP_SGE",
-                        LowLevelILOperation::FcmpE { .. } => "FCMP_E",
-                        LowLevelILOperation::FcmpNe { .. } => "FCMP_NE",
-                        LowLevelILOperation::FcmpLt { .. } => "FCMP_LT",
-                        LowLevelILOperation::FcmpLe { .. } => "FCMP_LE",
-                        LowLevelILOperation::FcmpGt { .. } => "FCMP_GT",
-                        LowLevelILOperation::FcmpGe { .. } => "FCMP_GE",
+                        Equal { .. } => "CMP_E",
+                        NotEqual { .. } => "CMP_NE",
+                        UnsignedLessThan { .. } => "CMP_ULT",
+                        UnsignedLessThanEqual { .. } => "CMP_ULE",
+                        UnsignedGreaterThan { .. } => "CMP_UGT",
+                        UnsignedGreaterThanEqual { .. } => "CMP_UGE",
+                        SignedLessThan { .. } => "CMP_SLT",
+                        SignedLessThanEqual { .. } => "CMP_SLE",
+                        SignedGreaterThan { .. } => "CMP_SGT",
+                        SignedGreaterThanEqual { .. } => "CMP_SGE",
+                        FcmpE { .. } => "FCMP_E",
+                        FcmpNe { .. } => "FCMP_NE",
+                        FcmpLt { .. } => "FCMP_LT",
+                        FcmpLe { .. } => "FCMP_LE",
+                        FcmpGt { .. } => "FCMP_GT",
+                        FcmpGe { .. } => "FCMP_GE",
                         _ => panic!("Invalid operation: {:?}", instr.operation),
                     };
 
+                    // Check if this rule should collapse it's definition register
+                    if let Some(collapsed_rules) =
+                        check_collapse_rule(&mut bv, left.clone(), operation, right)?
+                    {
+                        for rule in collapsed_rules {
+                            let new_rule = format!("{address:#x},{size:#x},{rule}",);
+                            lines.push(new_rule);
+                        }
+                        continue;
+                    }
+
+                    // Parse and add this rule
                     let mut left_str = String::new();
                     let mut right_str = String::new();
-                    get_cmp_operand(&mut bv, left, &mut left_str)?;
-                    get_cmp_operand(&mut bv, right, &mut right_str)?;
+                    get_cmp_operand(&mut bv, &left, &mut left_str)?;
+                    get_cmp_operand(&mut bv, &right, &mut right_str)?;
 
                     let res = format!("{address:#x},{size:#x},{left_str},{operation},{right_str}",);
+                    println!("{res}");
 
                     lines.push(res);
                 }
@@ -144,7 +165,10 @@ fn main() -> Result<()> {
                     dest: LowLevelILInstruction { operation, .. },
                 } => match **operation {
                     LowLevelILOperation::ConstPtr { constant } => {
-                        let name = bv.get_symbol_at(constant)?.name();
+                        let name = match bv.get_symbol_at(constant) {
+                            Ok(symbol) => symbol.name().to_string(),
+                            Err(_) => format!("UnknownSymbol: {constant:#x}"),
+                        };
 
                         // Get the registers for this function's calling convention
                         let mut function = instr.function.function();
@@ -175,6 +199,7 @@ fn main() -> Result<()> {
                         };
 
                         // Add this function call to the results
+                        println!("{res}");
                         lines.push(res);
                     }
                     _ => {}
@@ -220,9 +245,14 @@ pub fn get_cmp_operand(
                     panic!("Failed to get SSA");
                 };
 
-                let LowLevelILOperation::SetRegSsa { dest, src } =
-                    &*func_ssa.get_ssa_reg_definition(src).operation
-                else {
+                let Some(def) = func_ssa.get_ssa_reg_definition(src) else {
+                    panic!(
+                        "No SSA reg for this variable? {:#x} {instr:?}",
+                        instr.address
+                    );
+                };
+
+                let LowLevelILOperation::SetRegSsa { dest, src } = &*def.operation else {
                     panic!("Failed to get SetRegSsa");
                 };
 
@@ -233,6 +263,17 @@ pub fn get_cmp_operand(
         }
         LowLevelILOperation::Load { src } => {
             output.push_str("load_from ");
+            get_cmp_operand(bv, src, output)?;
+        }
+        LowLevelILOperation::SignExtend { src } => {
+            output.push_str("sign_extend ");
+            get_cmp_operand(bv, src, output)?;
+        }
+        LowLevelILOperation::ZeroExtend { src } => {
+            output.push_str("zero_extend ");
+            get_cmp_operand(bv, src, output)?;
+        }
+        LowLevelILOperation::LowPart { src } => {
             get_cmp_operand(bv, src, output)?;
         }
         LowLevelILOperation::ConstPtr { constant } => {
@@ -249,6 +290,17 @@ pub fn get_cmp_operand(
         | LowLevelILOperation::And { left, right }
         | LowLevelILOperation::Lsr { left, right }
         | LowLevelILOperation::Lsl { left, right }
+        | LowLevelILOperation::Asr { left, right }
+        | LowLevelILOperation::Equal { left, right }
+        | LowLevelILOperation::NotEqual { left, right }
+        | LowLevelILOperation::UnsignedLessThan { left, right }
+        | LowLevelILOperation::UnsignedLessThanEqual { left, right }
+        | LowLevelILOperation::UnsignedGreaterThan { left, right }
+        | LowLevelILOperation::UnsignedGreaterThanEqual { left, right }
+        | LowLevelILOperation::SignedLessThan { left, right }
+        | LowLevelILOperation::SignedLessThanEqual { left, right }
+        | LowLevelILOperation::SignedGreaterThan { left, right }
+        | LowLevelILOperation::SignedGreaterThanEqual { left, right }
         | LowLevelILOperation::MuluDp { left, right } => {
             let name = match *instr.operation {
                 LowLevelILOperation::Add { .. } => "add",
@@ -256,9 +308,20 @@ pub fn get_cmp_operand(
                 LowLevelILOperation::And { .. } => "and",
                 LowLevelILOperation::Or { .. } => "or",
                 LowLevelILOperation::Xor { .. } => "xor",
-                LowLevelILOperation::Lsr { .. } => "logical_shift_right",
-                LowLevelILOperation::Lsl { .. } => "logical_shift_left",
+                LowLevelILOperation::Lsl { .. } => "lsl",
+                LowLevelILOperation::Lsr { .. } => "lsr",
+                LowLevelILOperation::Asr { .. } => "asr",
                 LowLevelILOperation::MuluDp { .. } => "mul",
+                LowLevelILOperation::Equal { .. } => "eq",
+                LowLevelILOperation::NotEqual { .. } => "not_eq",
+                LowLevelILOperation::UnsignedLessThan { .. } => "u<",
+                LowLevelILOperation::UnsignedLessThanEqual { .. } => "u<=",
+                LowLevelILOperation::UnsignedGreaterThan { .. } => "u>",
+                LowLevelILOperation::UnsignedGreaterThanEqual { .. } => "u>=",
+                LowLevelILOperation::SignedLessThan { .. } => "s<",
+                LowLevelILOperation::SignedLessThanEqual { .. } => "s<=",
+                LowLevelILOperation::SignedGreaterThan { .. } => "s>",
+                LowLevelILOperation::SignedGreaterThanEqual { .. } => "s>=",
                 _ => panic!("Invalid arithmetic operation"),
             };
 
@@ -275,4 +338,146 @@ pub fn get_cmp_operand(
     }
 
     Ok(())
+}
+
+/// This common pattern compares the result of an operation. We
+/// want to create the rule that would actually produce the result.
+///
+/// eax = eax & ecx
+/// al = eax != 0
+///
+/// Would produce the rule: reg eax,CMP_NE,0x0
+/// Want to produce:        and reg eax reg ecx,CMP_NE,0x0
+///
+/// In this case, we want to check eax & ecx == 0 and not just the result
+fn check_collapse_rule(
+    bv: &mut BinaryView,
+    left: LowLevelILInstruction,
+    operation: &str,
+    right: &LowLevelILInstruction,
+) -> Result<Option<HashSet<String>>> {
+    use LowLevelILOperation::*;
+
+    let left_defs = left.definition()?;
+    let mut lines = HashSet::new();
+
+    if !left_defs.is_empty()
+        && (matches!(*left.operation, Reg { .. }) && matches!(*right.operation, Const { constant }))
+    {
+        let Const { constant } = *right.operation else {
+            unreachable!();
+        };
+
+        for (i, left_def) in left_defs.iter().enumerate() {
+            match &*left_def.operation {
+                And { left, right }
+                | Add { left, right }
+                | Sub { left, right }
+                | Sbb {
+                    left,
+                    right,
+                    carry: _,
+                }
+                | Or { left, right }
+                | Xor { left, right }
+                | Sub { left, right }
+                | Lsl { left, right }
+                | Lsr { left, right }
+                | Asr { left, right }
+                | Ror { left, right }
+                | Equal { left, right }
+                | NotEqual { left, right }
+                | UnsignedLessThan { left, right }
+                | UnsignedLessThanEqual { left, right }
+                | UnsignedGreaterThan { left, right }
+                | UnsignedGreaterThanEqual { left, right }
+                | SignedLessThan { left, right }
+                | SignedLessThanEqual { left, right }
+                | SignedGreaterThan { left, right }
+                | SignedGreaterThanEqual { left, right }
+                | FcmpE { left, right }
+                | FcmpNe { left, right }
+                | FcmpLt { left, right }
+                | FcmpLe { left, right }
+                | FcmpGt { left, right }
+                | FcmpGe { left, right }
+                | MuluDp { left, right } => {
+                    let mut left_str = String::new();
+                    let mut right_str = String::new();
+                    get_cmp_operand(bv, &left, &mut left_str)?;
+                    get_cmp_operand(bv, &right, &mut right_str)?;
+
+                    // Use the operation of a conditional if the conditional
+                    // is in the definition
+                    let operation = match &*left_def.operation {
+                        Equal { .. } => "CMP_E",
+                        NotEqual { .. } => "CMP_NE",
+                        UnsignedLessThan { .. } => "CMP_ULT",
+                        UnsignedLessThanEqual { .. } => "CMP_ULE",
+                        UnsignedGreaterThan { .. } => "CMP_UGT",
+                        UnsignedGreaterThanEqual { .. } => "CMP_UGE",
+                        SignedLessThan { .. } => "CMP_SLT",
+                        SignedLessThanEqual { .. } => "CMP_SLE",
+                        SignedGreaterThan { .. } => "CMP_SGT",
+                        SignedGreaterThanEqual { .. } => "CMP_SGE",
+                        FcmpE { .. } => "FCMP_E",
+                        FcmpNe { .. } => "FCMP_NE",
+                        FcmpLt { .. } => "FCMP_LT",
+                        FcmpLe { .. } => "FCMP_LE",
+                        FcmpGt { .. } => "FCMP_GT",
+                        FcmpGe { .. } => "FCMP_GE",
+                        op => operation,
+                    };
+
+                    let res = format!("{left_str},{operation},{right_str}",);
+                    lines.insert(res);
+
+                    if constant != 0 {
+                        for adjustment in ["add", "sub"] {
+                            let res = format!(
+                                "{left_str},{operation},{adjustment} {constant:#x} {right_str}",
+                            );
+                            lines.insert(res);
+
+                            let res = format!(
+                                "{adjustment} {constant } {left_str},{operation},{right_str}",
+                            );
+                            lines.insert(res);
+                        }
+                    }
+
+                    continue;
+                }
+                Call { .. }
+                | Load { .. }
+                | Reg { .. }
+                | Const { .. }
+                | Flag { .. }
+                | SignExtend { .. }
+                | LowPart { .. }
+                | Neg { .. }
+                | ZeroExtend { .. } => {
+
+                    // Valid operation, keep the original left operand
+                }
+                x => {
+                    panic!("Is this an SSA def: {:#x} {x:?}", left.address);
+                    /*
+                    println!(
+                        "{:#x} -> {:#x}",
+                        left.address,
+                        left_def.unwrap().address
+                    );
+                    println!("{:x?} -> {:x?}", left, left_def);
+                    */
+                }
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(lines))
+    }
 }

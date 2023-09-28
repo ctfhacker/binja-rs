@@ -16,5 +16,5 @@ features = ["disable"]
 
 [dependencies.binja-rs]
 path = "../../../binja-rs"
-# features = ["introspection"]
-features = []
+features = ["introspection"]
+# features = []

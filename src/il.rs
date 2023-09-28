@@ -18,7 +18,7 @@ use binja_sys::{BNGetGotoLabelName, BNGetHighLevelILSSAVarDefinition};
 use binja_sys::{BNGetMediumLevelILSSAVarDefinition, BNGetMediumLevelILSSAVarUses};
 use binja_sys::{BNGetVariableName, BNGetVariableType, BNToVariableIdentifier, BNVariable};
 
-#[derive(Clone)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct Register {
     arch: CoreArchitecture,
     pub index: u32,
@@ -106,6 +106,7 @@ impl std::fmt::Debug for Flag {
 }
 
 /// An SSA Register
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct SSARegister {
     pub reg: Register,
     pub version: u32,
@@ -127,6 +128,7 @@ impl std::fmt::Debug for SSARegister {
 }
 
 /// An SSA Flag
+#[derive(Clone)]
 pub struct SSAFlag {
     flag: Flag,
     version: u32,

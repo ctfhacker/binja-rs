@@ -7,9 +7,10 @@ use binja_sys::*;
 use anyhow::{anyhow, Result};
 use log::trace;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::mem;
 use std::slice;
 use std::sync::Arc;
@@ -101,7 +102,7 @@ impl LowLevelILFunction {
         })
     }
 
-    pub fn get_ssa_reg_definition(&self, ssavar: &SSARegister) -> LowLevelILInstruction {
+    pub fn get_ssa_reg_definition(&self, ssavar: &SSARegister) -> Option<LowLevelILInstruction> {
         let index = unsafe {
             BNGetLowLevelILSSARegisterDefinition(
                 self.handle(),
@@ -110,7 +111,11 @@ impl LowLevelILFunction {
             )
         };
 
-        LowLevelILInstruction::from_func_index(self.clone(), index)
+        if index == usize::MAX {
+            return None;
+        }
+
+        Some(LowLevelILInstruction::from_func_index(self.clone(), index))
     }
 
     /*
@@ -277,6 +282,7 @@ impl BasicBlockTrait for LowLevelILBasicBlock {
     }
 }
 
+#[derive(Clone)]
 pub struct LowLevelILInstruction {
     pub operation: Box<LowLevelILOperation>,
     pub source_operand: u32,
@@ -287,7 +293,7 @@ pub struct LowLevelILInstruction {
     pub function: LowLevelILFunction,
     pub expr_index: usize,
     pub instr_index: Option<usize>,
-    pub text: Result<String>,
+    pub text: String,
 }
 
 impl LowLevelILInstruction {
@@ -315,12 +321,16 @@ impl LowLevelILInstruction {
         // If we have the instruction index, grab the text for that instruction
         let text = if let Some(index) = instr_index {
             if index as i64 == -1 {
-                println!("BAD INDEX: {}", std::backtrace::Backtrace::force_capture());
+                println!(
+                    "BAD INDEX: \n{}",
+                    std::backtrace::Backtrace::force_capture()
+                );
             }
 
             func.text(index)
+                .unwrap_or_else(|_| "Unknown text".to_string())
         } else {
-            Err(anyhow!("text() for None from_expr unimpl")) // unimplemented!()
+            "text() for None from_expr unimpl".to_string()
         };
 
         LowLevelILInstruction {
@@ -357,6 +367,114 @@ impl LowLevelILInstruction {
                 self.instr_index,
             ))
         }
+    }
+
+    /// Get the definition of this instruction
+    pub fn definition(&self) -> Result<Vec<LowLevelILInstruction>> {
+        timeloop::scoped_timer!(crate::Timer::LowLevelILInstruction__definition);
+
+        // Get the SSA register for this instruction to get it's definition(s)
+        let src = match *self.ssa_form()?.operation {
+            LowLevelILOperation::RegSsa { src }
+            | LowLevelILOperation::RegSsaPartial { full_reg: src, .. } => src,
+
+            LowLevelILOperation::LoadSsa { .. }
+            | LowLevelILOperation::And { .. }
+            | LowLevelILOperation::Sub { .. }
+            | LowLevelILOperation::Lsr { .. }
+            | LowLevelILOperation::Add { .. }
+            | LowLevelILOperation::Reg { .. }
+            | LowLevelILOperation::Unimpl {} => {
+                return Ok(Vec::new());
+            }
+
+            x => panic!(
+                "{:#x} Unimpl for LLIL definition: {self:?} -> {x:?}",
+                self.address
+            ),
+        };
+
+        let func_ssa = self.function.ssa_form()?;
+        let mut results = Vec::new();
+        let mut srcs = vec![src];
+
+        // Keep track of which registers we've seen
+        let mut seen = HashSet::new();
+
+        // Get the definition of the found ssa register via the SSA form of the
+        // instruction's function
+        while let Some(src) = srcs.pop() {
+            // Skip registers we've already visited
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            src.hash(&mut hasher);
+            let hash = hasher.finish();
+            if !seen.insert(hash) {
+                continue;
+            }
+
+            let Some(def) = func_ssa.get_ssa_reg_definition(&src) else {
+                println!("No SSA reg definition found: {:#x} {src:x?}", self.address);
+                continue;
+            };
+
+            match *def.operation {
+                LowLevelILOperation::SetRegSsa { src, .. }
+                | LowLevelILOperation::SetRegSsaPartial { src, .. }
+                | LowLevelILOperation::SetRegSplitSsa { src, .. } => results.push(src),
+                LowLevelILOperation::CallSsa { .. } => results.push(def),
+                LowLevelILOperation::RegPhi { src, .. } => {
+                    srcs.extend(src);
+                    continue;
+                }
+                ref i => panic!(
+                    "{:#x} Failed to get LLIL::definition from {def:x?}: {i:#x?}",
+                    self.address
+                ),
+            };
+        }
+
+        // If the resulting instruction is a Nop, attempt to shed one layer of the instruction
+        //
+        // Example
+        //
+        // LLILSSA
+        // 25 @ 5555555553fd  rax#8 = zx.q(sx.d([rax#7].b @ mem#13))
+        // 26 @ 555555555403  if (rax#8.eax == 0) then 27 @ 0x55555555543d else 45 @ 0x555555555409
+        //
+        // If we take just `zx.q(sx.d([rax#7].b @ mem#13))` and attempt to get a non_ssa_form
+        // it returns a Nop (since the zero extend isn't used in the non-ssa-form). Shed the
+        // ZeroExtend and we get the correct non_ssa_form instruction
+        //
+        // LLIL
+        // 21 @ 5555555553fd  eax = sx.d([rax].b)
+        // 22 @ 555555555403  if (eax == 0) then 23 @ 0x55555555543d else 41 @ 0x555555555409
+        let mut out_defs = Vec::new();
+
+        for result in results.iter_mut() {
+            loop {
+                if matches!(
+                    *result.non_ssa_form()?.operation,
+                    LowLevelILOperation::Nop {}
+                ) {
+                    match &*result.operation {
+                        LowLevelILOperation::ZeroExtend { src } => *result = src.clone(),
+                        _ => panic!(
+                            "{:#x} LLIL::definition returns a Nop. Unable to find the correct instruction.",
+                            self.address
+                        ),
+                    }
+                }
+
+                // Found a non-Nop result, return it
+                break;
+            }
+
+            // Add this result to the list of results
+            out_defs.push(result.non_ssa_form()?);
+        }
+
+        // Return the found definition for this instruction
+        Ok(out_defs)
     }
 
     /// Convert LLIL SSA instruction into LLIL
@@ -413,10 +531,7 @@ impl LowLevelILInstruction {
 
 impl fmt::Display for LowLevelILInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.text {
-            Ok(text) => write!(f, "{} ", text),
-            Err(_) => write!(f, "[{}:{}] Invalid text!", self.function, self.address),
-        }
+        write!(f, "{} ", self.text)
     }
 }
 
@@ -496,7 +611,7 @@ macro_rules! reg_or_flag_ssa_list {
 }
 */
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LowLevelILOperation {
     Nop {},
     SetReg {
