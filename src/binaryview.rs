@@ -2,7 +2,7 @@
 use binja_sys::*;
 
 use anyhow::{anyhow, Context, Result};
-use log::trace;
+use log::{info, trace};
 use rayon::prelude::*;
 
 use std::borrow::Cow;
@@ -100,7 +100,6 @@ impl BinaryViewBuilder<'_> {
         }
 
         trace!("env_logger initialized!");
-
         init_plugins();
 
         let is_db = !filename.ends_with("bndb");
@@ -139,7 +138,7 @@ impl BinaryViewBuilder<'_> {
                 bv.create_database()?;
             }
 
-            trace!(
+            info!(
                 "Analysis took {}.{} seconds",
                 now.elapsed().as_secs(),
                 now.elapsed().subsec_nanos()
@@ -454,6 +453,46 @@ impl BinaryView {
         }
 
         res
+    }
+
+    /// Get all LLIL expressions in the binary
+    pub fn par_llil_expressions(&self) -> Vec<LowLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__par_llil_expressions);
+
+        let mut res = Vec::new();
+
+        let all_instrs: Vec<Vec<LowLevelILInstruction>> = self
+            .functions()
+            .par_iter()
+            .filter_map(|func| func.llil_expressions().ok())
+            .collect();
+
+        for instrs in all_instrs {
+            res.extend(instrs);
+        }
+
+        res
+    }
+
+    /// Get all LLIL expressions in the binary who's function
+    pub fn par_llil_expressions_filtered(
+        &self,
+        filter: fn(&Function) -> bool,
+    ) -> impl Iterator<Item = Vec<LowLevelILInstruction>> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__par_llil_expressions);
+
+        let (sender, recv) = std::sync::mpsc::channel();
+
+        self.functions()
+            .par_iter()
+            .filter(|func| filter(func))
+            .for_each(|func| {
+                if let Ok(exprs) = func.llil_expressions() {
+                    sender.send(exprs).unwrap();
+                }
+            });
+
+        recv.into_iter()
     }
 
     /// Get all MLIL instructions in the binary

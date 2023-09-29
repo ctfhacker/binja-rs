@@ -81,6 +81,7 @@ timeloop::impl_enum!(
         BinaryView__LLILInstructions,
         BinaryView__Platform,
         BinaryView__LLILExpressions,
+        BinaryView__par_llil_expressions,
 
         Function__LLILInstructions,
         Function__LLILExpressions,

@@ -421,9 +421,13 @@ impl LowLevelILInstruction {
                 LowLevelILOperation::SetRegSsa { src, .. }
                 | LowLevelILOperation::SetRegSsaPartial { src, .. }
                 | LowLevelILOperation::SetRegSplitSsa { src, .. } => results.push(src),
+
                 LowLevelILOperation::CallSsa { .. } => results.push(def),
                 LowLevelILOperation::RegPhi { src, .. } => {
                     srcs.extend(src);
+                    continue;
+                }
+                LowLevelILOperation::Unimpl { .. } => {
                     continue;
                 }
                 ref i => panic!(
