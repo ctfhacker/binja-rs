@@ -479,7 +479,7 @@ impl BinaryView {
         &self,
         filter: fn(&Function) -> bool,
     ) -> impl Iterator<Item = Vec<LowLevelILInstruction>> {
-        timeloop::scoped_timer!(crate::Timer::BinaryView__par_llil_expressions);
+        timeloop::scoped_timer!(crate::Timer::BinaryView__par_llil_expressions_filtered);
 
         let (sender, recv) = std::sync::mpsc::channel();
 
