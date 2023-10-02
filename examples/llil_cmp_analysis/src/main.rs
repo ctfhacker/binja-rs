@@ -1,3 +1,5 @@
+#![feature(thread_id_value)]
+
 use anyhow::Result;
 use clap::Parser;
 
