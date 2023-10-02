@@ -1,5 +1,8 @@
 #![feature(type_ascription)]
 #![feature(associated_type_defaults)]
+#![feature(thread_id_value)]
+#![feature(panic_update_hook)]
+#![feature(allocator_api)]
 
 use anyhow::anyhow;
 
@@ -17,6 +20,7 @@ pub mod il;
 pub mod instruction;
 pub mod lowlevelil;
 pub mod mediumlevelil;
+pub mod metadata;
 pub mod platform;
 pub mod plugin;
 pub mod reference;
@@ -56,6 +60,7 @@ timeloop::impl_enum!(
         BNGetMediumLevelILSSAForm,
         BNGetMediumLevelILNonSSAForm,
         BNGetMediumLevelILBasicBlockForInstruction,
+        BNCreateMetadataOfType,
         BNCreateSaveSettings,
         BNUpdateAnalysisAndWait,
         BNUpdateAnalysis,
@@ -77,6 +82,7 @@ timeloop::impl_enum!(
         BinaryView__Name,
         BinaryView__TypeName,
         BinaryView__Open,
+        BinaryView__Load,
         BinaryView__AvailableViewTypes,
         BinaryView__LLILInstructions,
         BinaryView__Platform,

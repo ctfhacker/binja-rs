@@ -23,6 +23,7 @@ use crate::function::Function;
 use crate::highlevelil::HighLevelILInstruction;
 use crate::lowlevelil::LowLevelILInstruction;
 use crate::mediumlevelil::MediumLevelILInstruction;
+use crate::metadata::{Metadata, MetadataOption};
 use crate::platform::Platform;
 use crate::plugin::Plugins;
 use crate::reference::ReferenceSource;
@@ -38,7 +39,7 @@ use crate::wrappers::BinjaBinaryView;
 pub struct BinaryView {
     /// Handle given by BinjaCore
     handle: Arc<BinjaBinaryView>,
-    meta: FileMetadata,
+    file_metadata: FileMetadata,
 }
 
 unsafe impl Send for BinaryView {}
@@ -54,6 +55,7 @@ impl Drop for BinaryView {
         // If this is the last active binary view, shut down binary ninja
         if crate::ACTIVE_BINARYVIEWS.fetch_sub(1, Ordering::SeqCst) == 1 {
             trace!("Dropping last active binary view. Shutting down binary ninja");
+
             unsafe { BNShutdown() }
             timeloop::print!();
         }
@@ -63,11 +65,18 @@ impl Drop for BinaryView {
 pub struct BinaryViewBuilder<'a> {
     filename: &'a str,
     base_addr: Option<u64>,
+    options: Vec<(&'static str, MetadataOption)>,
 }
 
 impl BinaryViewBuilder<'_> {
     pub fn base_addr(mut self, base_addr: Option<u64>) -> Self {
         self.base_addr = base_addr;
+        self
+    }
+
+    /// Add the given option to the metadata options
+    pub fn option<T: Into<MetadataOption>>(mut self, key: &'static str, value: T) -> Self {
+        self.options.push((key, value.into()));
         self
     }
 
@@ -86,6 +95,7 @@ impl BinaryViewBuilder<'_> {
         let BinaryViewBuilder {
             filename,
             base_addr,
+            options,
         } = self;
 
         // If this is the first binary view, start the profiler
@@ -104,68 +114,66 @@ impl BinaryViewBuilder<'_> {
 
         let is_db = !filename.ends_with("bndb");
 
-        // Create the initial binary view to get the available view types
-        let view = BinaryView::open(filename)?;
+        // Load the given filename with options
+        let mut bv = BinaryView::load(filename, options)?;
 
-        // Init the logger
-        // Go through all found view types (except Raw) for this file and attempt to create that
-        // type
-        for view_type in view.available_view_types() {
-            if view_type.name() == "Raw" {
-                continue;
-            }
+        // If successfully created, update analysis for the view
+        let now = Instant::now();
 
-            // Create the view type
-            let mut bv = view_type.create(&view)?;
-
-            // If successfully created, update analysis for the view
-            let now = Instant::now();
-
-            bv.update_analysis_and_wait();
-
-            // Rebase the view if given a new base address
-            if let Some(base_addr) = base_addr {
-                unsafe {
-                    BNRebase(bv.handle(), base_addr);
-                }
-
-                // Create the rebased binary view
-                bv = bv.get_view_of_type(&view_type.name().to_string())?;
-            }
-
-            if !is_db {
-                // Write the database if the file isn't already a db
-                bv.create_database()?;
-            }
-
-            info!(
-                "Analysis took {}.{} seconds",
-                now.elapsed().as_secs(),
-                now.elapsed().subsec_nanos()
-            );
-
-            // Return the view
-            return Ok(bv);
+        // Rebase the view if given a new base address
+        if let Some(base_addr) = base_addr {
+            bv = bv.rebase(base_addr)?;
         }
 
-        Err(anyhow!(
-            "Failed to find a view type for given file: {}",
-            filename
-        ))
+        // Analyze the binary now that possible options (like rebase) have been applied
+        bv.update_analysis_and_wait();
+
+        if !is_db {
+            // Write the database if the file isn't already a db
+            bv.create_database()?;
+        }
+
+        info!(
+            "Analysis took {}.{} seconds",
+            now.elapsed().as_secs(),
+            now.elapsed().subsec_nanos()
+        );
+
+        // Return the view
+        return Ok(bv);
     }
 }
 
 impl BinaryView {
-    /// Utility for getting the handle for this `BinaryView`
-    pub fn handle(&self) -> *mut BNBinaryView {
-        **self.handle
+    fn new(handle: *mut BNBinaryView, file_metadata: FileMetadata) -> Self {
+        // Add to the current active binary views
+        crate::ACTIVE_BINARYVIEWS.fetch_add(1, Ordering::SeqCst);
+
+        BinaryView {
+            handle: Arc::new(BinjaBinaryView::new(handle)),
+            file_metadata,
+        }
     }
 
     pub fn new_from_filename(filename: &str) -> BinaryViewBuilder {
+        // In the case of a panic, shutdown Binary Ninja and then panic as normal
+        std::panic::update_hook(move |prev, info| {
+            unsafe {
+                BNShutdown();
+            }
+            prev(info);
+        });
+
         BinaryViewBuilder {
             filename,
             base_addr: None,
+            options: Vec::new(),
         }
+    }
+
+    /// Utility for getting the handle for this `BinaryView`
+    pub fn handle(&self) -> *mut BNBinaryView {
+        **self.handle
     }
 
     /// Return the `Raw` BinaryViewType for this BinaryView
@@ -176,16 +184,19 @@ impl BinaryView {
     /// Return the `Raw` BinaryViewType for this BinaryView
     pub fn get_view_of_type(&self, name: &str) -> Result<BinaryView> {
         let name = CString::new(name).unwrap();
-        let handle = unsafe_try!(BNGetFileViewOfType(self.meta.handle(), name.as_ptr()))
-            .context("BNGetFileViewOfType failed")?;
+        if name.to_str()? != "Raw" {
+            let view_type = unsafe { BNGetBinaryViewTypeByName(name.as_ptr()) };
+            let view_type = BinaryViewType::new(view_type);
+            return view_type.create(self);
+        }
 
-        // Add to the current active binary views
-        crate::ACTIVE_BINARYVIEWS.fetch_add(1, Ordering::SeqCst);
+        let handle = unsafe_try!(BNGetFileViewOfType(
+            self.file_metadata.handle(),
+            name.as_ptr()
+        ))
+        .context("Failed to get raw view with BNGetFileViewOfType")?;
 
-        Ok(BinaryView {
-            handle: Arc::new(BinjaBinaryView::new(handle)),
-            meta: self.meta.clone(),
-        })
+        Ok(BinaryView::new(handle, self.file_metadata.clone()))
     }
 
     /// # Example
@@ -228,6 +239,20 @@ impl BinaryView {
         }
 
         Ok(Some(Function::new(handle)?))
+    }
+
+    /// Rebase to the given `base_addr`
+    pub fn rebase(&self, base_addr: u64) -> Result<Self> {
+        // Rebase the binary view
+        unsafe {
+            BNRebase(self.handle(), base_addr);
+        }
+
+        // Get the view type of this view
+        let view_type_str = unsafe { CStr::from_ptr(BNGetViewType(self.handle())) };
+
+        // Create the rebased binary view
+        self.get_view_of_type(view_type_str.to_str()?)
     }
 
     /// # Example
@@ -288,7 +313,7 @@ impl BinaryView {
     pub fn name(&self) -> PathBuf {
         timeloop::scoped_timer!(crate::Timer::BinaryView__Name);
 
-        self.meta.filename()
+        self.file_metadata.filename()
     }
 
     pub fn len(&self) -> u64 {
@@ -327,6 +352,7 @@ impl BinaryView {
     /// Open a BinaryDataView for the given
     fn open(filename: &str) -> Result<BinaryView> {
         timeloop::scoped_timer!(crate::Timer::BinaryView__Open);
+        panic!("Open is gone");
 
         init_plugins();
 
@@ -348,19 +374,13 @@ impl BinaryView {
 
             unsafe_try!(BNOpenExistingDatabase(metadata.handle(), ffi_name.as_ptr()))?
         } else {
-            // Add to the current active binary views
-            crate::ACTIVE_BINARYVIEWS.fetch_add(1, Ordering::SeqCst);
-
             unsafe_try!(BNCreateBinaryDataViewFromFilename(
                 metadata.handle(),
                 ffi_name.as_ptr()
             ))?
         };
 
-        Ok(BinaryView {
-            handle: Arc::new(BinjaBinaryView::new(handle)),
-            meta: metadata,
-        })
+        Ok(BinaryView::new(handle, metadata))
     }
 
     fn read(&self, addr: u64, len: u64) -> DataBuffer {
@@ -371,6 +391,32 @@ impl BinaryView {
                 len.try_into().unwrap(),
             ))
         }
+    }
+
+    /// Loads a BinaryView for the given filename
+    fn load(filename: &str, options: Vec<(&'static str, MetadataOption)>) -> Result<BinaryView> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Load);
+
+        // Get the filemetadata for this file
+        let file_metadata = FileMetadata::from_filename(filename)?;
+
+        // Load the filename using `BNLoadFilename`
+        let mut metadata = Metadata::new()?;
+
+        // Add the options if any are present
+        for (key, val) in options {
+            info!("Setting option: {key} {val:?}");
+            if !metadata.insert(key, val) {
+                panic!("Failed to set option");
+            }
+            info!("Metadata size: {}", metadata.len());
+        }
+
+        let ffi_name = CString::new(filename).unwrap();
+        let handle = unsafe { BNLoadFilename(ffi_name.as_ptr(), true, None, metadata.handle()) };
+
+        // Return the found binary view
+        Ok(BinaryView::new(handle, file_metadata))
     }
 
     fn available_view_types(&self) -> Vec<BinaryViewType> {
@@ -455,6 +501,29 @@ impl BinaryView {
         res
     }
 
+    /// Get all LLIL expressions in the binary who's function returned `true` for the given filter
+    pub fn llil_expressions_filtered(
+        &self,
+        filter: fn(&Function) -> bool,
+    ) -> Vec<LowLevelILInstruction> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__LLILExpressions);
+
+        let mut res = Vec::new();
+
+        let all_instrs: Vec<Vec<LowLevelILInstruction>> = self
+            .functions()
+            .iter()
+            .filter(|func| filter(func))
+            .filter_map(|func| func.llil_expressions().ok())
+            .collect();
+
+        for instrs in all_instrs {
+            res.extend(instrs);
+        }
+
+        res
+    }
+
     /// Get all LLIL expressions in the binary
     pub fn par_llil_expressions(&self) -> Vec<LowLevelILInstruction> {
         timeloop::scoped_timer!(crate::Timer::BinaryView__par_llil_expressions);
@@ -474,7 +543,8 @@ impl BinaryView {
         res
     }
 
-    /// Get all LLIL expressions in the binary who's function
+    /// Get all LLIL expressions in the binary who's function returned `true` for the given filter
+    /// using rayon to parallelize analyzing the functions
     pub fn par_llil_expressions_filtered(
         &self,
         filter: fn(&Function) -> bool,
@@ -483,14 +553,19 @@ impl BinaryView {
 
         let (sender, recv) = std::sync::mpsc::channel();
 
-        self.functions()
-            .par_iter()
-            .filter(|func| filter(func))
-            .for_each(|func| {
+        self.functions().par_iter().for_each(|func| {
+            timeloop::start_thread!();
+
+            if filter(func) {
                 if let Ok(exprs) = func.llil_expressions() {
                     sender.send(exprs).unwrap();
                 }
-            });
+            } else {
+                log::info!("Filtering out function: {:?}", func.name());
+            }
+
+            timeloop::stop_thread!();
+        });
 
         recv.into_iter()
     }
@@ -831,7 +906,7 @@ impl BinaryView {
     /// Create a database for this binary view
     pub fn create_database(&self) -> Result<()> {
         unsafe {
-            let mut bndb = self.meta.filename();
+            let mut bndb = self.file_metadata.filename();
             bndb.set_extension("bndb");
 
             // Get a generic save settings to save with
@@ -848,7 +923,7 @@ impl BinaryView {
             if !res {
                 Err(anyhow!("Failed to create database"))
             } else {
-                print!("Saved database to {:?}\n", bndb);
+                info!("Saved database to {:?}\n", bndb);
                 Ok(())
             }
         }
@@ -961,12 +1036,6 @@ impl BinaryViewType {
     fn create(&self, data: &BinaryView) -> Result<BinaryView> {
         let handle = unsafe_try!(BNCreateBinaryViewOfType(self.handle, data.handle()))?;
 
-        // Add to the current active binary views
-        crate::ACTIVE_BINARYVIEWS.fetch_add(1, Ordering::SeqCst);
-
-        Ok(BinaryView {
-            handle: Arc::new(BinjaBinaryView::new(handle)),
-            meta: data.meta.clone(),
-        })
+        Ok(BinaryView::new(handle, data.file_metadata.clone()))
     }
 }

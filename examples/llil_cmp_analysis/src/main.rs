@@ -17,6 +17,15 @@ struct Args {
 
     #[arg(long)]
     base_addr: Option<String>,
+
+    #[arg(long)]
+    max_analysis_time: Option<u64>,
+
+    #[arg(long)]
+    max_function_size: Option<u64>,
+
+    #[arg(long, default_value = "full")]
+    mode: Option<String>,
 }
 
 timeloop::impl_enum!(
@@ -83,6 +92,7 @@ timeloop::create_profiler!(Timer);
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let start = std::time::Instant::now();
 
     timeloop::start_profiler!();
 
@@ -90,14 +100,30 @@ fn main() -> Result<()> {
     println!("Writing cmp rules to {out_file}");
     let mut out_file = File::create(out_file)?;
 
+    // Log Info to stdout
+    binjalog::to_stdout(binjalog::LogLevel::Info);
+
     let mut bv = timeloop::time_work!(Timer::BinaryNinja, {
-        binaryview::BinaryView::new_from_filename(&args.input)
-            .base_addr(
-                args.base_addr
-                    .map(|x| u64::from_str_radix(&x.replace("0x", ""), 16).unwrap()),
-            )
-            .build()
-            .unwrap()
+        let base_addr = args
+            .base_addr
+            .map(|x| u64::from_str_radix(&x.replace("0x", ""), 16).unwrap());
+
+        let mut bv = binaryview::BinaryView::new_from_filename(&args.input);
+        bv = bv.base_addr(base_addr);
+
+        if let Some(max_analysis_time) = args.max_analysis_time {
+            bv = bv.option("analysis.limits.maxFunctionAnalysisTime", max_analysis_time);
+        }
+
+        if let Some(max_function_size) = args.max_function_size {
+            bv = bv.option("analysis.limits.maxFunctionSize", max_function_size);
+        }
+
+        bv = bv.option("analysis.mode", "basic");
+        bv = bv.option("analysis.linearSweep.detailedLogInfo", true);
+
+        // Build the BinaryView after adding the options
+        bv.build().unwrap()
     });
 
     /// Returns `true` if the given function contains a substring related to ASAN
@@ -106,20 +132,25 @@ fn main() -> Result<()> {
             &["asan", "ubsan", "msan", "lcov", "sanitizer", "interceptor"];
 
         // Check if the given function contains any of the blacklisted functions
-        DEFAULT_IGNORE.iter().any(|bad_func| {
+        let res = DEFAULT_IGNORE.iter().any(|bad_func| {
             func.name()
-                .map(|f| f.to_string().contains(&*bad_func))
+                .map(|f| f.to_string().contains(bad_func))
                 .unwrap_or(false)
-        })
+        });
+
+        // Return `true` if it is NOT an asan function, and `false` otherwise
+        !res
     }
 
     use LowLevelILOperation::*;
     timeloop::time_work!(Timer::ParseExpressions, {
         let now = std::time::Instant::now();
-        for instrs in bv
-            .par_llil_expressions_filtered(filter_non_asan)
-            .into_iter()
+        for instrs in bv.llil_expressions_filtered(filter_non_asan)
+        // .par_llil_expressions_filtered(filter_non_asan)
+        // .into_iter()
         {
+            let instrs = [instrs];
+
             for instr in instrs {
                 match &*instr.operation {
                     Equal { left, right }
@@ -215,12 +246,11 @@ fn main() -> Result<()> {
                                     instr.address
                                 )
                             } else {
-                                eprintln!("Ignoring function call {name:?}");
+                                // eprintln!("Ignoring function call {name:?}");
                                 continue;
                             };
 
                             // Add this function call to the results
-                            println!("{res}");
                             out_file.write(res.as_bytes());
                         }
                         _ => {}
@@ -231,14 +261,9 @@ fn main() -> Result<()> {
         }
     });
 
-    /*
-    timeloop::time_work!(Timer::BinaryNinja, {
-        std::fs::write(&out_file, lines.join("\n"));
-        println!("Output rules written to {out_file}");
-    });
-    */
-
     timeloop::print!();
+
+    println!("Total time: {:?}", start.elapsed());
 
     Ok(())
 }
@@ -473,18 +498,18 @@ fn check_collapse_rule(
                         op => operation,
                     };
 
-                    let res = format!("{left_str},{operation},{right_str}\n");
+                    let res = format!("{left_str},{operation},{right_str}");
                     lines.insert(res);
 
                     if constant != 0 {
                         for adjustment in ["add", "sub"] {
                             let res = format!(
-                                "{left_str},{operation},{adjustment} {constant:#x} {right_str}\n",
+                                "{left_str},{operation},{adjustment} {constant:#x} {right_str}",
                             );
                             lines.insert(res);
 
                             let res = format!(
-                                "{adjustment} {constant} {left_str},{operation},{right_str}\n",
+                                "{adjustment} {constant} {left_str},{operation},{right_str}",
                             );
                             lines.insert(res);
                         }
@@ -501,8 +526,8 @@ fn check_collapse_rule(
                 | LowPart { .. }
                 | Neg { .. }
                 | ConstPtr { .. }
+                | FloatToInt { .. }
                 | ZeroExtend { .. } => {
-
                     // Valid operation, keep the original left operand
                 }
                 x => {

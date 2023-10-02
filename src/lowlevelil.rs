@@ -376,7 +376,14 @@ impl LowLevelILInstruction {
         // Get the SSA register for this instruction to get it's definition(s)
         let src = match *self.ssa_form()?.operation {
             LowLevelILOperation::RegSsa { src }
-            | LowLevelILOperation::RegSsaPartial { full_reg: src, .. } => src,
+            | LowLevelILOperation::RegSsaPartial { full_reg: src, .. } => {
+                if matches!(src, SSARegister { version: 0, .. }) {
+                    // No definition for the first version of a variable
+                    return Ok(Vec::new());
+                }
+
+                src
+            }
 
             LowLevelILOperation::LoadSsa { .. }
             | LowLevelILOperation::And { .. }
@@ -404,6 +411,11 @@ impl LowLevelILInstruction {
         // Get the definition of the found ssa register via the SSA form of the
         // instruction's function
         while let Some(src) = srcs.pop() {
+            // No definition for the first version of a variable
+            if matches!(src, SSARegister { version: 0, .. }) {
+                continue;
+            }
+
             // Skip registers we've already visited
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             src.hash(&mut hasher);
@@ -462,9 +474,10 @@ impl LowLevelILInstruction {
                 ) {
                     match &*result.operation {
                         LowLevelILOperation::ZeroExtend { src } => *result = src.clone(),
-                        _ => panic!(
-                            "{:#x} LLIL::definition returns a Nop. Unable to find the correct instruction.",
-                            self.address
+                        _ => log::warn!(
+                            "{:#x} LLIL::definition returns a Nop. Unable to find the correct instruction from {:x?}",
+                            self.address,
+                            result
                         ),
                     }
                 }
