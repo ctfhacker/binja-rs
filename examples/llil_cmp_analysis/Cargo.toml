@@ -1,5 +1,5 @@
 [package]
-name = "llil_parser"
+name = "llil_cmp_parser"
 version = "0.1.0"
 authors = ["thebarbershopper <cld251@gmail.com>"]
 edition = "2021"
@@ -12,6 +12,7 @@ rayon = "1.8.0"
 [dependencies.timeloop]
 git = "https://github.com/ctfhacker/timeloop"
 default-features = false
+# features = ["enable"]
 features = ["disable"]
 
 [dependencies.binja-rs]

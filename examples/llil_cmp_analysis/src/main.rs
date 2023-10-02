@@ -119,7 +119,7 @@ fn main() -> Result<()> {
             bv = bv.option("analysis.limits.maxFunctionSize", max_function_size);
         }
 
-        bv = bv.option("analysis.mode", "basic");
+        bv = bv.option("analysis.mode", args.mode.unwrap());
         bv = bv.option("analysis.linearSweep.detailedLogInfo", true);
 
         // Build the BinaryView after adding the options

@@ -36,7 +36,7 @@ impl Metadata {
 
     pub fn insert(&mut self, key: &'static str, val: MetadataOption) -> bool {
         match val {
-            MetadataOption::Str(value) => self.insert_str(key, value),
+            MetadataOption::Str(value) => self.insert_str(key, value.as_str()),
             MetadataOption::U64(value) => self.insert_u64(key, value),
             MetadataOption::I64(value) => self.insert_i64(key, value),
             MetadataOption::F64(value) => self.insert_f64(key, value),
@@ -104,16 +104,22 @@ impl Metadata {
 /// The type of a key for metadata
 #[derive(Debug)]
 pub enum MetadataOption {
-    Str(&'static str),
+    Str(String),
     U64(u64),
     I64(i64),
     F64(f64),
     Bool(bool),
 }
 
+impl From<String> for MetadataOption {
+    fn from(val: String) -> MetadataOption {
+        MetadataOption::Str(val)
+    }
+}
+
 impl From<&'static str> for MetadataOption {
     fn from(val: &'static str) -> MetadataOption {
-        MetadataOption::Str(val)
+        MetadataOption::Str(val.to_string())
     }
 }
 
