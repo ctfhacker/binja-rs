@@ -68,6 +68,7 @@ timeloop::impl_enum!(
         BNHasFunctions,
         BNGetViewLength,
         BNGetStartOffset,
+        BNGetFileForView,
 
         Startup__InitPlugins,
         BinaryView__NewFromFilename,
@@ -89,6 +90,9 @@ timeloop::impl_enum!(
         BinaryView__LLILExpressions,
         BinaryView__par_llil_expressions,
         BinaryView__par_llil_expressions_filtered,
+        BinaryView__Rebase,
+        BinaryView__Functions,
+        BinaryView__GetFunctionAt,
 
         Function__LLILInstructions,
         Function__LLILExpressions,

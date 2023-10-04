@@ -1,14 +1,14 @@
-//! Provides `FileMetadata` 
+//! Provides `FileMetadata`
 use binja_sys::*;
 
 use anyhow::Result;
 
+use std::ffi::{CStr, CString};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::ffi::{CStr, CString};
 
-use crate::unsafe_try;
 use crate::startup::init_plugins;
+use crate::unsafe_try;
 use crate::wrappers::BinjaFileMetadata;
 
 /// Struct containing handle to `FileMetadata` from Binary Ninja
@@ -22,8 +22,9 @@ impl FileMetadata {
         init_plugins();
 
         let handle = unsafe_try!(BNCreateFileMetadata())?;
-
-        Ok(FileMetadata { handle: Arc::new(BinjaFileMetadata::new(handle)) })
+        Ok(FileMetadata {
+            handle: Arc::new(BinjaFileMetadata::new(handle)),
+        })
     }
 
     pub fn handle(&self) -> *mut BNFileMetadata {
@@ -38,14 +39,22 @@ impl FileMetadata {
         Ok(metadata)
     }
 
+    /// Create a `FileMetadata` from a filename
+    pub(crate) fn from_binary_view(view: *mut BNBinaryView) -> Result<FileMetadata> {
+        let handle = unsafe_try!(BNGetFileForView(view))?;
+
+        Ok(FileMetadata {
+            handle: Arc::new(BinjaFileMetadata::new(handle)),
+        })
+    }
+
     /// Retrieve the filename for this `FileMetadata`
     pub fn filename(&self) -> PathBuf {
-        unsafe { 
+        unsafe {
             let filename = BNGetFilename(self.handle());
             let name = CStr::from_ptr(filename).to_string_lossy().into_owned();
             BNFreeString(filename);
             PathBuf::from(name)
         }
     }
-
 }

@@ -54,7 +54,7 @@ impl Drop for BinaryView {
     fn drop(&mut self) {
         // If this is the last active binary view, shut down binary ninja
         if crate::ACTIVE_BINARYVIEWS.fetch_sub(1, Ordering::SeqCst) == 1 {
-            trace!("Dropping last active binary view. Shutting down binary ninja");
+            info!("Dropping last active binary view. Shutting down binary ninja");
 
             unsafe { BNShutdown() }
             timeloop::print!();
@@ -178,25 +178,34 @@ impl BinaryView {
 
     /// Return the `Raw` BinaryViewType for this BinaryView
     pub fn raw_view(&self) -> Result<BinaryView> {
-        self.get_view_of_type("Raw")
+        let name = CString::new("Raw").unwrap();
+        let handle = unsafe { BNGetFileViewOfType(self.file_metadata.handle(), name.as_ptr()) };
+        assert!(handle as usize > 0, "Raw view failed");
+
+        Ok(BinaryView::new(handle, self.file_metadata.clone()))
     }
 
     /// Return the `Raw` BinaryViewType for this BinaryView
     pub fn get_view_of_type(&self, name: &str) -> Result<BinaryView> {
         let name = CString::new(name).unwrap();
-        if name.to_str()? != "Raw" {
-            let view_type = unsafe { BNGetBinaryViewTypeByName(name.as_ptr()) };
-            let view_type = BinaryViewType::new(view_type);
-            return view_type.create(self);
-        }
-
         let handle = unsafe_try!(BNGetFileViewOfType(
             self.file_metadata.handle(),
             name.as_ptr()
-        ))
-        .context("Failed to get raw view with BNGetFileViewOfType")?;
+        ));
 
-        Ok(BinaryView::new(handle, self.file_metadata.clone()))
+        match handle {
+            Ok(handle) => Ok(BinaryView::new(handle, self.file_metadata.clone())),
+            Err(_) => {
+                let view_type = unsafe { BNGetBinaryViewTypeByName(name.as_ptr()) };
+                assert!(view_type as usize > 0);
+
+                let view =
+                    unsafe { BNCreateBinaryViewOfType(view_type, self.raw_view()?.handle()) };
+                assert!(view as usize > 0);
+
+                Ok(BinaryView::new(view, self.file_metadata.clone()))
+            }
+        }
     }
 
     /// # Example
@@ -207,6 +216,8 @@ impl BinaryView {
     /// assert_eq!(bv.functions().len(), 192);
     /// ```
     pub fn functions(&self) -> Vec<Function> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Functions);
+
         let mut count = 0;
 
         unsafe {
@@ -228,6 +239,8 @@ impl BinaryView {
 
     /// Return the function starting at the given `addr`
     pub fn get_function_at(&self, addr: u64) -> Result<Option<Function>> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__GetFunctionAt);
+
         let plat = self
             .platform()
             .ok_or(anyhow!("Can't get_function_at without platform"))?;
@@ -243,16 +256,23 @@ impl BinaryView {
 
     /// Rebase to the given `base_addr`
     pub fn rebase(&self, base_addr: u64) -> Result<Self> {
+        timeloop::scoped_timer!(crate::Timer::BinaryView__Rebase);
+
         // Rebase the binary view
-        unsafe {
-            BNRebase(self.handle(), base_addr);
-        }
+        let result = unsafe { BNRebase(self.handle(), base_addr) };
+        assert!(result, "Rebase failed");
 
         // Get the view type of this view
-        let view_type_str = unsafe { CStr::from_ptr(BNGetViewType(self.handle())) };
+        let view_type_str = unsafe { BNGetViewType(self.handle()) };
+
+        // Get the file view for this view type
+        let handle = unsafe_try!(BNGetFileViewOfType(
+            self.file_metadata.clone().handle(),
+            view_type_str
+        ))?;
 
         // Create the rebased binary view
-        self.get_view_of_type(view_type_str.to_str()?)
+        Ok(BinaryView::new(handle, self.file_metadata.clone()))
     }
 
     /// # Example
@@ -397,9 +417,6 @@ impl BinaryView {
     fn load(filename: &str, options: Vec<(&'static str, MetadataOption)>) -> Result<BinaryView> {
         timeloop::scoped_timer!(crate::Timer::BinaryView__Load);
 
-        // Get the filemetadata for this file
-        let file_metadata = FileMetadata::from_filename(filename)?;
-
         // Load the filename using `BNLoadFilename`
         let mut metadata = Metadata::new()?;
 
@@ -409,11 +426,15 @@ impl BinaryView {
             if !metadata.insert(key, val) {
                 panic!("Failed to set option");
             }
-            info!("Metadata size: {}", metadata.len());
         }
 
         let ffi_name = CString::new(filename).unwrap();
-        let handle = unsafe { BNLoadFilename(ffi_name.as_ptr(), true, None, metadata.handle()) };
+        let progress_func = None;
+        let handle =
+            unsafe { BNLoadFilename(ffi_name.as_ptr(), false, progress_func, metadata.handle()) };
+
+        // Create the file metadata for this binary view
+        let file_metadata = FileMetadata::from_binary_view(handle)?;
 
         // Return the found binary view
         Ok(BinaryView::new(handle, file_metadata))

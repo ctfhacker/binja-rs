@@ -28,6 +28,9 @@ struct Args {
 
     #[arg(long, default_value = "full")]
     mode: Option<String>,
+
+    #[arg(long)]
+    jobs: Option<u32>,
 }
 
 timeloop::impl_enum!(
@@ -103,14 +106,14 @@ fn main() -> Result<()> {
     let mut out_file = File::create(out_file)?;
 
     // Log Info to stdout
-    binjalog::to_stdout(binjalog::LogLevel::Info);
+    // binjalog::to_stdout(binjalog::LogLevel::Info);
 
     let mut bv = timeloop::time_work!(Timer::BinaryNinja, {
+        let mut bv = binaryview::BinaryView::new_from_filename(&args.input);
+
         let base_addr = args
             .base_addr
             .map(|x| u64::from_str_radix(&x.replace("0x", ""), 16).unwrap());
-
-        let mut bv = binaryview::BinaryView::new_from_filename(&args.input);
         bv = bv.base_addr(base_addr);
 
         if let Some(max_analysis_time) = args.max_analysis_time {
@@ -122,7 +125,7 @@ fn main() -> Result<()> {
         }
 
         bv = bv.option("analysis.mode", args.mode.unwrap());
-        bv = bv.option("analysis.linearSweep.detailedLogInfo", true);
+        bv = bv.option("analysis.limits.workerThreadCount", args.jobs.unwrap_or(12));
 
         // Build the BinaryView after adding the options
         bv.build().unwrap()
@@ -147,9 +150,10 @@ fn main() -> Result<()> {
     use LowLevelILOperation::*;
     timeloop::time_work!(Timer::ParseExpressions, {
         let now = std::time::Instant::now();
-        for instrs in bv.llil_expressions_filtered(filter_non_asan)
-        // .par_llil_expressions_filtered(filter_non_asan)
-        // .into_iter()
+        for instrs in bv
+            .llil_expressions_filtered(filter_non_asan)
+            // .par_llil_expressions_filtered(filter_non_asan)
+            .into_iter()
         {
             let instrs = [instrs];
 
@@ -198,7 +202,7 @@ fn main() -> Result<()> {
                         if let Some(collapsed_rules) =
                             check_collapse_rule(&mut bv, left.clone(), operation, right)?
                         {
-                            for rule in collapsed_rules {
+                            for (address, rule) in collapsed_rules {
                                 let new_rule = format!("{address:#x},{size:#x},{rule}\n");
                                 out_file.write(new_rule.as_bytes());
                             }
@@ -217,46 +221,48 @@ fn main() -> Result<()> {
                     }
                     LowLevelILOperation::Call {
                         dest: LowLevelILInstruction { operation, .. },
-                    } => match **operation {
-                        LowLevelILOperation::ConstPtr { constant } => {
-                            let name = match bv.get_symbol_at(constant) {
-                                Ok(symbol) => symbol.name().to_string(),
-                                Err(_) => format!("UnknownSymbol: {constant:#x}"),
-                            };
+                    } => {
+                        match **operation {
+                            LowLevelILOperation::ConstPtr { constant } => {
+                                let name = match bv.get_symbol_at(constant) {
+                                    Ok(symbol) => symbol.full_name().to_string(),
+                                    Err(e) => format!("UnknownSymbol: {e:?} {constant:#x}"),
+                                };
 
-                            // Get the registers for this function's calling convention
-                            let mut function = instr.function.function();
-                            let calling_convention = function.calling_convention()?;
-                            let arg1 = &calling_convention.int_arg_regs[0];
-                            let arg2 = &calling_convention.int_arg_regs[1];
-                            let arg3 = &calling_convention.int_arg_regs[2];
+                                // Get the registers for this function's calling convention
+                                let mut function = instr.function.function();
+                                let calling_convention = function.calling_convention()?;
+                                let arg1 = &calling_convention.int_arg_regs[0];
+                                let arg2 = &calling_convention.int_arg_regs[1];
+                                let arg3 = &calling_convention.int_arg_regs[2];
 
-                            let res = if STRCMPS.contains(&name.as_str())
-                                || STRCASECMPS.contains(&name.as_str())
-                                || STRNCMPS.contains(&name.as_str())
-                                || STRNCASECMPS.contains(&name.as_str())
-                            {
-                                // A two argument function call
-                                format!(
-                                    "{:#x},{:#x},reg {arg1},strcmp,reg {arg2}\n",
-                                    instr.address, instr.size
-                                )
-                            } else if MEMCMPS.contains(&name.as_str()) {
-                                // A three argument function call with a dynamic size
-                                format!(
-                                    "{:#x},reg {arg3},reg {arg1},memcmp,reg {arg2}\n",
-                                    instr.address
-                                )
-                            } else {
-                                // eprintln!("Ignoring function call {name:?}");
-                                continue;
-                            };
+                                let res = if STRCMPS.contains(&name.as_str())
+                                    || STRCASECMPS.contains(&name.as_str())
+                                    || STRNCMPS.contains(&name.as_str())
+                                    || STRNCASECMPS.contains(&name.as_str())
+                                {
+                                    // A two argument function call
+                                    format!(
+                                        "{:#x},{:#x},reg {arg1},strcmp,reg {arg2}\n",
+                                        instr.address, instr.size
+                                    )
+                                } else if MEMCMPS.contains(&name.as_str()) {
+                                    // A three argument function call with a dynamic size
+                                    format!(
+                                        "{:#x},reg {arg3},reg {arg1},memcmp,reg {arg2}\n",
+                                        instr.address
+                                    )
+                                } else {
+                                    // eprintln!("Ignoring function call {name:?}");
+                                    continue;
+                                };
 
-                            // Add this function call to the results
-                            out_file.write(res.as_bytes());
+                                // Add this function call to the results
+                                out_file.write(res.as_bytes());
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    },
+                    }
                     _ => {}
                 }
             }
@@ -271,7 +277,7 @@ fn main() -> Result<()> {
 }
 
 pub fn get_cmp_operand(
-    bv: &mut BinaryView,
+    bv: &BinaryView,
     instr: &LowLevelILInstruction,
     output: &mut String,
 ) -> Result<()> {
@@ -405,11 +411,11 @@ pub fn get_cmp_operand(
 ///
 /// In this case, we want to check eax & ecx == 0 and not just the result
 fn check_collapse_rule(
-    bv: &mut BinaryView,
+    bv: &BinaryView,
     left: LowLevelILInstruction,
     operation: &str,
     right: &LowLevelILInstruction,
-) -> Result<Option<HashSet<String>>> {
+) -> Result<Option<HashSet<(u64, String)>>> {
     use LowLevelILOperation::*;
 
     let left_defs = left.definition()?;
@@ -501,19 +507,22 @@ fn check_collapse_rule(
                     };
 
                     let res = format!("{left_str},{operation},{right_str}");
-                    lines.insert(res);
+                    assert!(left.address == right.address);
+                    let addr = left.address;
+
+                    lines.insert((addr, res));
 
                     if constant != 0 {
                         for adjustment in ["add", "sub"] {
                             let res = format!(
                                 "{left_str},{operation},{adjustment} {constant:#x} {right_str}",
                             );
-                            lines.insert(res);
+                            lines.insert((addr, res));
 
                             let res = format!(
                                 "{adjustment} {constant} {left_str},{operation},{right_str}",
                             );
-                            lines.insert(res);
+                            lines.insert((addr, res));
                         }
                     }
 

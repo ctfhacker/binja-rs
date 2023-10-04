@@ -49,13 +49,8 @@ impl Metadata {
         let key_str = CString::new(key).unwrap();
         let value_str = CString::new(value).unwrap();
 
-        println!("Insert {key} -> {value}");
-
         unsafe {
-            // let value_handle = BNCreateMetadataStringData(value.as_ptr().cast());
             let value_handle = BNCreateMetadataStringData(value_str.as_ptr());
-            println!("Value handle: {:#x}", value_handle as usize);
-
             BNMetadataSetValueForKey(self.handle(), key_str.as_ptr(), value_handle)
         }
     }
